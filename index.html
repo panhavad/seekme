@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#07070c" />
+    <meta name="description" content="SeekMe - a semi-3D hide & seek ghost game you can play completely offline." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <title>SeekMe</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <!-- ============================ In-game HUD ============================ -->
+      <div id="hud" class="hidden" aria-hidden="true">
+        <div class="hud-top">
+          <div class="hud-chip" id="hud-role"><span class="dot"></span><span id="hud-role-text">Hider</span></div>
+          <div class="hud-timer" id="hud-timer">02:00</div>
+          <button class="hud-chip ghost-btn" id="btn-pause" type="button">Menu</button>
+        </div>
+        <div class="hud-objective" id="hud-objective">Stay hidden until the clock runs out.</div>
+        <div class="hud-bottom">
+          <div class="hud-meter" id="hud-meter">
+            <span class="meter-label" id="hud-meter-label">Chill trail</span>
+            <div class="meter-bar"><i id="hud-meter-fill"></i></div>
+          </div>
+          <div class="hud-alerts" id="hud-alerts"></div>
+        </div>
+        <div class="joystick" id="joystick" aria-hidden="true"><i id="joystick-knob"></i></div>
+      </div>
+
+      <!-- ============================== Main menu ============================= -->
+      <div id="menu" class="screen">
+        <div class="panel">
+          <header class="brand">
+            <canvas id="logo-canvas" class="logo-canvas" aria-hidden="true"></canvas>
+            <h1 class="visually-hidden">SeekMe</h1>
+            <p class="tagline">A lantern, a maze, and two little ghosts.</p>
+          </header>
+
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="play" type="button" role="tab">Play</button>
+            <button class="tab" data-tab="online" type="button" role="tab">Online</button>
+            <button class="tab" data-tab="board" type="button" role="tab">Leaderboard</button>
+            <button class="tab" data-tab="how" type="button" role="tab">How to play</button>
+          </div>
+
+          <section class="tab-panel active" data-panel="play">
+            <label class="field">
+              <span>Ghost name</span>
+              <input id="input-name" type="text" maxlength="16" placeholder="Boo" autocomplete="nickname" />
+            </label>
+
+            <div class="field">
+              <span>Pick your side</span>
+              <div class="choices" id="choice-role">
+                <button class="choice selected" data-value="hider" type="button">
+                  <strong class="cold">Hider</strong>
+                  <small>Cold ghost. Slow, quiet, leaves frost. Survive the clock.</small>
+                </button>
+                <button class="choice" data-value="seeker" type="button">
+                  <strong class="warm">Seeker</strong>
+                  <small>Lantern ghost. Scorches the stones. Catch them fast.</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span>Difficulty</span>
+              <div class="choices compact" id="choice-difficulty">
+                <button class="choice" data-value="easy" type="button"><strong>Easy</strong><small>Dozy rival</small></button>
+                <button class="choice selected" data-value="normal" type="button"><strong>Normal</strong><small>Fair chase</small></button>
+                <button class="choice" data-value="hard" type="button"><strong>Hard</strong><small>Sharp senses</small></button>
+              </div>
+            </div>
+
+            <button class="primary" id="btn-play" type="button">Enter the maze</button>
+            <p class="hint" id="menu-hint">Loads once, then plays fully offline.</p>
+          </section>
+
+          <section class="tab-panel" data-panel="online">
+            <p class="online-lead">
+              Play a private match with a friend. One of you hosts and shares the code, the other
+              types it in — only a few hundred bytes a second cross the wire.
+            </p>
+
+            <div class="field">
+              <span>Host a game</span>
+              <div class="choices" id="choice-online-role">
+                <button class="choice selected" data-value="hider" type="button">
+                  <strong class="cold">I'll hide</strong>
+                  <small>Your friend seeks with the lantern.</small>
+                </button>
+                <button class="choice" data-value="seeker" type="button">
+                  <strong class="warm">I'll seek</strong>
+                  <small>Your friend hides in the dark.</small>
+                </button>
+              </div>
+              <button class="primary online-primary" id="btn-host" type="button">Create game code</button>
+            </div>
+
+            <div class="code-box hidden" id="code-box">
+              <span>Share this code</span>
+              <strong id="room-code">----</strong>
+              <button class="ghost-btn" id="btn-copy-code" type="button">Copy</button>
+            </div>
+
+            <div class="field">
+              <span>Or join a friend</span>
+              <div class="join-row">
+                <input id="input-code" type="text" maxlength="6" placeholder="CODE" autocomplete="off" spellcheck="false" />
+                <button class="ghost-btn" id="btn-join" type="button">Join</button>
+              </div>
+            </div>
+
+            <div class="sync-row">
+              <span id="online-status" class="sync-status">Not connected.</span>
+              <button class="ghost-btn hidden" id="btn-cancel-online" type="button">Cancel</button>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-panel="board">            <div class="board-switch">
+              <button class="pill selected" data-board="seeker" type="button">Fastest seekers</button>
+              <button class="pill" data-board="hider" type="button">Longest hiders</button>
+            </div>
+            <ol class="board" id="board-list">
+              <li class="board-empty">Loading…</li>
+            </ol>
+            <div class="sync-row">
+              <span id="sync-status" class="sync-status">Checking server…</span>
+              <button class="ghost-btn" id="btn-sync" type="button">Sync now</button>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-panel="how">
+            <ul class="how">
+              <li><b>Move</b> with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows, or drag anywhere on touch.</li>
+              <li><b class="warm">Seeker heat:</b> the lantern scorches stone. Stones glow red where the seeker lingered, and fade as they cool.</li>
+              <li><b class="cold">Hider frost:</b> the cold ghost leaves blue footprints that deepen the longer it stands still.</li>
+              <li><b>Melt ponds:</b> stand still too long as the hider and the frost melts into a <b>permanent</b> puddle.</li>
+              <li><b>Splash!</b> Any ghost stepping in a pond makes a sound both sides can hear and locate.</li>
+              <li><b>Win:</b> hiders survive the clock, seekers catch the hider as fast as possible.</li>
+              <li><b>Offline:</b> play with no connection; scores queue up and sync to the leaderboard when you reconnect.</li>
+              <li><b>Online:</b> open the <b>Online</b> tab, create a code and share it — your friend types it in and you play the same maze together.</li>
+            </ul>
+          </section>
+        </div>
+        <footer class="version" id="app-version"></footer>
+      </div>
+
+      <!-- ============================ Result screen =========================== -->
+      <div id="result" class="screen hidden">
+        <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+        <div class="panel result-panel">
+          <h2 id="result-title">Caught!</h2>
+          <p id="result-sub">The lantern found you at 01:12.</p>
+          <div class="result-score">
+            <span id="result-score-label">Time survived</span>
+            <strong id="result-score-value">01:12</strong>
+            <em id="result-extra" class="result-extra hidden"></em>
+          </div>
+          <div class="submit-row">
+            <span id="submit-status" class="sync-status">Score saved locally.</span>
+            <button class="ghost-btn" id="btn-retry-sync" type="button">Sync to leaderboard</button>
+          </div>
+          <ol class="board" id="result-board"></ol>
+          <div class="result-actions">
+            <button class="primary" id="btn-again" type="button">Play again</button>
+            <button class="ghost-btn" id="btn-menu" type="button">Main menu</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ Pause overlay =========================== -->
+      <div id="pause" class="screen hidden">
+        <div class="panel small">
+          <h2>Paused</h2>
+          <div class="result-actions">
+            <button class="primary" id="btn-resume" type="button">Resume</button>
+            <button class="ghost-btn" id="btn-quit" type="button">Quit to menu</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

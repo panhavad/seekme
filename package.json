@@ -1,0 +1,22 @@
+{
+  "name": "seekme",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SeekMe - a semi-3D offline-first hide & seek ghost game built with three.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "serve": "node server/server.mjs",
+    "start": "npm run build && node server/server.mjs"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.3.6"
+  }
+}

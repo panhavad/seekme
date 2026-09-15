@@ -1,0 +1,19 @@
+{
+  "name": "SeekMe",
+  "short_name": "SeekMe",
+  "description": "A semi-3D hide & seek ghost game that plays fully offline.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#05050a",
+  "theme_color": "#07070c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

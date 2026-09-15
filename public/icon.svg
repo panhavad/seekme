@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffd89b" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#ff8a2b" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="sheet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#d9d5ca" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#07070c" />
+  <circle cx="150" cy="330" r="160" fill="url(#glow)" />
+  <path
+    d="M256 78c-73 0-132 59-132 132v192c0 14 16 21 26 12l38-34 33 30a15 15 0 0 0 20 0l33-30 33 30a15 15 0 0 0 20 0l35-31c10-9 26-2 26-12V210c0-73-59-132-132-132z"
+    fill="url(#sheet)"
+  />
+  <circle cx="212" cy="222" r="19" fill="#1b1b22" />
+  <circle cx="300" cy="222" r="19" fill="#1b1b22" />
+  <path d="M232 268c13 16 35 16 48 0" stroke="#1b1b22" stroke-width="13" fill="none" stroke-linecap="round" />
+  <g transform="translate(96 268)">
+    <rect x="14" y="10" width="56" height="70" rx="12" fill="#2a1c10" stroke="#ffb257" stroke-width="6" />
+    <circle cx="42" cy="46" r="18" fill="#ffd89b" />
+    <path d="M42 0v12M22 12h40" stroke="#ffb257" stroke-width="7" stroke-linecap="round" fill="none" />
+  </g>
+</svg>
