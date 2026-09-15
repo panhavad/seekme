@@ -147,7 +147,7 @@ export class TrailField {
     for (let i = 0; i < heat.length; i++) {
       const v = visible[i];
       if (v > explored[i]) explored[i] = v;
-      const light = Math.max(v, explored[i] * 0.5);
+      const light = Math.max(v, explored[i] * 0.62);
       const offset = i * 4;
       texels[offset] = Math.min(255, heat[i] * 255) | 0;
       texels[offset + 1] = Math.min(255, cold[i] * 255) | 0;

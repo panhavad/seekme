@@ -6,13 +6,17 @@ import { Game, type RoundResult } from './game/game';
 import { LeaderboardClient } from './net/leaderboard';
 import { OnlineSession } from './net/online';
 import { Ui } from './ui/ui';
-import { APP_VERSION, type Difficulty, type Role } from './game/config';
+import { APP_VERSION, EMOTES, type Difficulty, type EmoteKey, type Role } from './game/config';
+import { loadBrightness, loadTheme, saveBrightness, saveTheme } from './game/settings';
 import { randomSeed } from './core/rng';
 import { TitleLogo } from './render/logo';
+import { getTheme, type ThemeKey } from './render/themes';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const ui = new Ui(APP_VERSION);
-const stage = new Stage(canvas, shouldUseBloom());
+// The theme is a device setting, so the very first frame already wears it.
+let theme: ThemeKey = loadTheme();
+const stage = new Stage(canvas, shouldUseBloom(), getTheme(theme));
 const audio = new GameAudio();
 const input = new InputController(canvas, ui.joystick, ui.joystickKnob);
 const leaderboard = new LeaderboardClient();
@@ -26,6 +30,8 @@ let paused = false;
 let attractTimer = 0;
 let lastPlayedRole: Role = 'hider';
 let onlineMatch = false;
+let isLeader = true;
+let peerName = 'Your rival';
 
 // The spinning title only runs while the menu is on screen.
 ui.onScreenChange = (screen) => {
@@ -48,21 +54,31 @@ function startRound(role: Role): void {
     stage,
     audio,
     input,
-    { role, difficulty: ui.difficulty, seed: randomSeed() },
+    { role, difficulty: ui.difficulty, seed: randomSeed(), theme },
     {
       onHud: (state) => ui.updateHud(state),
       onAlert: (text, kind) => ui.alert(text, kind),
       onEnd: (result) => void finishRound(result),
+      onEmote: (glyph, who, colour, mine) => ui.emotePop(glyph, who, colour, mine),
     }
   );
+  ui.trackMinimap(game);
 }
 
 /** Starts a private match against another player. */
-function startOnlineRound(role: Role, seed: number, difficulty: Difficulty, peer: string): void {
+function startOnlineRound(
+  role: Role,
+  seed: number,
+  difficulty: Difficulty,
+  peer: string,
+  leader: boolean
+): void {
   game?.dispose();
   attract = false;
   paused = false;
   onlineMatch = true;
+  isLeader = leader;
+  peerName = peer;
   lastPlayedRole = role;
 
   ui.prepareHud(role);
@@ -72,13 +88,30 @@ function startOnlineRound(role: Role, seed: number, difficulty: Difficulty, peer
     stage,
     audio,
     input,
-    { role, difficulty, seed, online },
+    {
+      role,
+      difficulty,
+      seed,
+      online,
+      isLeader: leader,
+      peerName: peer,
+      playerName: leaderboard.playerName,
+      theme,
+    },
     {
       onHud: (state) => ui.updateHud(state),
       onAlert: (text, kind) => ui.alert(text, kind),
       onEnd: (result) => void finishRound(result),
+      onEmote: (glyph, who, colour, mine) => ui.emotePop(glyph, who, colour, mine),
+      onRemotePause: (value) => {
+        // The leader paused us: mirror it locally without asking again.
+        paused = value;
+        ui.setPauseInfo(!leader, peer);
+        ui.show(value ? 'pause' : 'game');
+      },
     }
   );
+  ui.trackMinimap(game);
   ui.alert(`Private match against ${peer}`, 'info');
 }
 
@@ -87,6 +120,7 @@ function startAttractScene(): void {
   window.clearTimeout(attractTimer);
   attract = true;
   paused = false;
+  ui.trackMinimap(null);
   game = new Game(
     stage,
     audio,
@@ -96,6 +130,7 @@ function startAttractScene(): void {
       difficulty: 'normal',
       seed: randomSeed(),
       autoPlay: true,
+      theme,
     },
     {
       onHud: () => {},
@@ -183,6 +218,33 @@ async function refreshBoard(role: Role, target: 'menu' | 'result'): Promise<void
 ui.setName(leaderboard.playerName);
 ui.onNameChange = (name) => {
   leaderboard.playerName = name;
+  // Reflect whatever we settled on (a cleared box rolls a new random name).
+  ui.setName(leaderboard.playerName);
+};
+
+ui.onRerollName = () => {
+  const name = leaderboard.rerollName();
+  ui.setName(name);
+  ui.toastMessage(`You are ${name}`);
+};
+
+// Brightness lives on the device: applied to the renderer, echoed by both sliders.
+const savedBrightness = stage.setBrightness(loadBrightness());
+ui.setBrightness(savedBrightness);
+ui.onBrightnessChange = (value) => {
+  saveBrightness(stage.setBrightness(value));
+};
+
+// So does the theme. The menu demo restarts on a change so the player sees the
+// new maze immediately instead of having to start a round to find out.
+ui.setTheme(theme);
+ui.onThemeChange = (next) => {
+  theme = next;
+  saveTheme(next);
+  stage.setTheme(getTheme(next));
+  audio.blip(false);
+  ui.toastMessage(`${getTheme(next).name} theme`);
+  if (attract) startAttractScene();
 };
 
 ui.onPlay = () => {
@@ -273,7 +335,7 @@ online.onMatch = (info) => {
   ui.showRoomCode(null);
   ui.setOnlineStatus(`Playing with ${info.peer}.`, 'ok');
   ui.clearJoinCode();
-  startOnlineRound(info.role, info.seed, info.difficulty, info.peer);
+  startOnlineRound(info.role, info.seed, info.difficulty, info.peer, info.isLeader);
 };
 
 online.onPeerLeft = () => {
@@ -283,6 +345,7 @@ online.onPeerLeft = () => {
 
 input.onAction = (action) => {
   if (action === 'pause' && game && !attract) togglePause(!paused);
+  if (action === 'skill') useSkill();
   if (action === 'mute') {
     muted = !muted;
     audio.setMuted(muted);
@@ -290,12 +353,42 @@ input.onAction = (action) => {
   }
 };
 
+input.onEmoteKey = (index) => {
+  const emote = EMOTES[index];
+  if (emote) playEmote(emote.key);
+};
+
+ui.onEmote = (key) => playEmote(key);
+ui.onSkill = () => useSkill();
+
+/** The wall skip: one wall crossed, then a long walk to earn it back. */
+function useSkill(): void {
+  if (!game || attract || paused || game.isOver) return;
+  void audio.resume();
+  game.useWallSkip();
+}
+
+function playEmote(key: EmoteKey): void {
+  if (!game || attract || game.isOver) return;
+  void audio.resume();
+  game.sendEmote(key);
+}
+
 let muted = false;
 
 function togglePause(value: boolean): void {
   if (!game || attract || game.isOver) return;
+  // Online, only the leader may pause: a guest can ask, never toggle.
+  if (onlineMatch && !isLeader) {
+    if (value) {
+      game.setPaused(true);
+      ui.toastMessage('Asked your friend to pause…');
+    }
+    return;
+  }
   paused = value;
   game.setPaused(value);
+  ui.setPauseInfo(false, peerName);
   ui.show(value ? 'pause' : 'game');
 }
 
@@ -319,6 +412,7 @@ function frame(now: number): void {
   const dt = Math.min(0.1, (now - previous) / 1000);
   previous = now;
   game?.update(dt);
+  ui.renderMinimap(dt);
 }
 
 startAttractScene();
@@ -337,10 +431,13 @@ if (new URLSearchParams(location.search).has('debug')) {
         input.axis.y = y;
       },
       finish: (win: boolean) => game?.forceFinish(win),
+      skip: () => game?.useWallSkip() ?? false,
       state: () => ({
         ...(game?.debugInfo ?? {}),
         attract,
         paused,
+        brightness: stage.brightnessValue,
+        theme,
         pendingScores: leaderboard.pendingCount,
       }),
     },

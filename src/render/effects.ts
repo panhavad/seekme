@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getTheme, type Theme } from './themes';
 
 interface Ring {
   mesh: THREE.Mesh;
@@ -29,7 +30,7 @@ export class Effects {
   private readonly moteBounds = 26;
   private time = 0;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, theme: Theme = getTheme(null)) {
     scene.add(this.group);
 
     const count = 220;
@@ -49,11 +50,11 @@ export class Effects {
     this.motes = new THREE.Points(
       geometry,
       new THREE.PointsMaterial({
-        size: 0.06,
+        size: theme.motes.size,
         map: softDotTexture(),
-        color: 0xffd7a0,
+        color: theme.motes.color,
         transparent: true,
-        opacity: 0.32,
+        opacity: theme.motes.opacity,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
         sizeAttenuation: true,
@@ -83,20 +84,25 @@ export class Effects {
     this.burst(x, z, color);
   }
 
+  /** A smaller, snappier pop for emotes. */
+  emoteBurst(x: number, z: number, color: number): void {
+    this.spawnRing(x, z, color, 0.7, 5.5, 0.35, false);
+    this.burst(x, z, color, 34, 0.9, 2.4);
+  }
+
   /** A puff of glowing sparks that arc up and fall back down. */
-  private burst(x: number, z: number, color: number): void {
-    const count = 90;
+  private burst(x: number, z: number, color: number, count = 90, life = 2.4, lift = 1): void {
     const positions = new Float32Array(count * 3);
     const velocities = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 1.6 + Math.random() * 3.4;
-      const lift = 3.4 + Math.random() * 3.6;
+      const speed = (1.6 + Math.random() * 3.4) * (lift > 1 ? 0.75 : 1);
+      const rise = (3.4 + Math.random() * 3.6) * (lift > 1 ? lift / 3.4 : 1);
       positions[i * 3] = x;
       positions[i * 3 + 1] = 0.7 + Math.random() * 0.4;
       positions[i * 3 + 2] = z;
       velocities[i * 3] = Math.cos(angle) * speed;
-      velocities[i * 3 + 1] = lift;
+      velocities[i * 3 + 1] = rise;
       velocities[i * 3 + 2] = Math.sin(angle) * speed;
     }
 
@@ -117,7 +123,7 @@ export class Effects {
     points.frustumCulled = false;
     points.renderOrder = 5;
     this.group.add(points);
-    this.sparks.push({ points, material, velocities, life: 2.4, maxLife: 2.4 });
+    this.sparks.push({ points, material, velocities, life, maxLife: life });
   }
 
   private spawnRing(

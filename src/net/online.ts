@@ -14,7 +14,16 @@ export type PeerEvent =
   | { e: 'splash'; x: number; z: number }
   | { e: 'pond'; cx: number; cy: number }
   | { e: 'caught'; t: number }
-  | { e: 'timeup'; t: number };
+  | { e: 'timeup'; t: number }
+  | { e: 'emote'; k: string }
+  /** A ghost slipped through a wall: `x`/`z` is where they came out. */
+  | { e: 'skip'; x: number; z: number; fx: number; fz: number }
+  /** Leader-authoritative pause. `t` is the leader's elapsed round time in ms. */
+  | { e: 'pause'; paused: boolean; t: number }
+  /** A guest asking the leader to pause. */
+  | { e: 'pauseRequest' }
+  /** Periodic clock correction from the leader. */
+  | { e: 'clock'; t: number };
 
 export interface MatchInfo {
   code: string;
@@ -24,6 +33,8 @@ export interface MatchInfo {
   peer: string;
   /** Server clock timestamp both sides start on. */
   startAt: number;
+  /** The host owns pausing and the authoritative round clock. */
+  isLeader: boolean;
 }
 
 type Status = 'idle' | 'connecting' | 'waiting' | 'ready' | 'playing' | 'closed';
@@ -38,6 +49,7 @@ export class OnlineSession {
   private socket: WebSocket | null = null;
   private status: Status = 'idle';
   private info: Partial<MatchInfo> = {};
+  private leader = false;
   /** Server time minus local time, so both sides share a clock. */
   private clockOffset = 0;
 
@@ -125,7 +137,9 @@ export class OnlineSession {
 
   sendEvent(event: PeerEvent): void {
     if (!this.connected) return;
-    this.send({ t: 'event', ...event });
+    // The payload is nested on purpose: several events carry their own `t`
+    // (a timestamp), which would otherwise clobber the envelope's message type.
+    this.send({ t: 'event', ev: event });
   }
 
   private receive(raw: string): void {
@@ -150,6 +164,7 @@ export class OnlineSession {
           role: message.role as Role,
           difficulty: message.difficulty as Difficulty,
         };
+        this.leader = true;
         this.onCode?.(String(message.code));
         this.setStatus('waiting', 'Waiting for a friend to join…');
         break;
@@ -161,6 +176,7 @@ export class OnlineSession {
           difficulty: message.difficulty as Difficulty,
           peer: String(message.peer ?? 'Ghost'),
         };
+        this.leader = false;
         this.setStatus('ready', 'Joined! Starting…');
         break;
       case 'peerJoined':
@@ -178,6 +194,7 @@ export class OnlineSession {
           difficulty: (this.info.difficulty ?? 'normal') as Difficulty,
           peer: this.info.peer ?? 'Ghost',
           startAt,
+          isLeader: this.leader,
         });
         break;
       }
@@ -191,7 +208,9 @@ export class OnlineSession {
         });
         break;
       case 'event':
-        this.onPeerEvent?.(message as unknown as PeerEvent);
+        if (message.ev && typeof message.ev === 'object') {
+          this.onPeerEvent?.(message.ev as unknown as PeerEvent);
+        }
         break;
       case 'peerLeft':
         this.setStatus('waiting', 'Your friend disconnected.');

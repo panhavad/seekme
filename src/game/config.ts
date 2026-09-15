@@ -3,7 +3,7 @@
 export type Role = 'hider' | 'seeker';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.0.1';
 
 export const TILE = 2.4;
 export const WALL_HEIGHT = 2.2;
@@ -56,6 +56,29 @@ export const SPEED = {
 
 export const BODY_RADIUS = 0.42;
 export const CATCH_DISTANCE = 1.35;
+
+/**
+ * "Wall skip": a ghost may slip through a single wall once its charge is full.
+ * The charge is deliberately slow, and it only builds at full speed while the
+ * ghost keeps walking - camping in a corner barely recharges it, and even a
+ * marathon runner never gets it back in much under half the base cooldown.
+ */
+export const WALL_SKIP = {
+  /** Seconds of recharge at the base (walking, no streak) rate. */
+  cooldownSeconds: 22,
+  /** Recharge multiplier while standing still. */
+  idleRate: 0.6,
+  /** Recharge multiplier the moment a ghost starts walking. */
+  walkRate: 1,
+  /** Extra multiplier earned per second of unbroken walking. */
+  walkRamp: 0.16,
+  /** Ceiling on that bonus, so a runner tops out at 1.8x - never instant. */
+  maxWalkBonus: 0.8,
+  /** Seconds of walking that still count toward the bonus. */
+  streakCap: 6,
+  /** Walking streak lost per second once the ghost stops. */
+  streakDecay: 0.8,
+};
 
 export const TRAIL = {
   /** Heat gained per second standing still on one tile. */
@@ -118,6 +141,52 @@ export const COLORS = {
   coldDeep: 0x2f7dff,
   sheet: 0xf3f1ea,
 };
+
+export type EmoteKey =
+  | 'surprise'
+  | 'angry'
+  | 'sad'
+  | 'scared'
+  | 'scream'
+  | 'annoyed'
+  | 'love'
+  | 'tease';
+
+export interface EmoteDefinition {
+  key: EmoteKey;
+  glyph: string;
+  label: string;
+  /** Third-person line, used for the other player. */
+  shout: string;
+  /** Second-person line, used for yourself. */
+  selfShout: string;
+  colour: string;
+}
+
+/** The little feelings players can throw at each other mid-chase. */
+export const EMOTES: readonly EmoteDefinition[] = [
+  { key: 'surprise', glyph: '😲', label: 'Surprised', shout: 'is surprised!', selfShout: 'are surprised!', colour: '#ffd98a' },
+  { key: 'angry', glyph: '😠', label: 'Angry', shout: 'is angry!', selfShout: 'are angry!', colour: '#ff7a5a' },
+  { key: 'sad', glyph: '😢', label: 'Sad', shout: 'is sad…', selfShout: 'are sad…', colour: '#8fc4ff' },
+  { key: 'scared', glyph: '😨', label: 'Scared', shout: 'is scared!', selfShout: 'are scared!', colour: '#a5d8ff' },
+  { key: 'scream', glyph: '😱', label: 'Scream', shout: 'screams!', selfShout: 'scream!', colour: '#ffffff' },
+  { key: 'annoyed', glyph: '😤', label: 'Annoyed', shout: 'is fed up!', selfShout: 'are fed up!', colour: '#ffb257' },
+  { key: 'love', glyph: '😍', label: 'Love', shout: 'sends love!', selfShout: 'send love!', colour: '#ff9ec7' },
+  { key: 'tease', glyph: '😝', label: 'Teasing', shout: 'is teasing you!', selfShout: 'are teasing!', colour: '#b6f28a' },
+];
+
+export function findEmote(key: string): EmoteDefinition | null {
+  return EMOTES.find((emote) => emote.key === key) ?? null;
+}
+
+/** Playful default names so nobody is ever "Anonymous ghost" online. */
+export function randomGhostName(): string {
+  const first = ['Shy', 'Cozy', 'Wispy', 'Tiny', 'Jolly', 'Sleepy', 'Spooky', 'Fuzzy', 'Silly', 'Misty'];
+  const second = ['Boo', 'Mochi', 'Pebble', 'Muffin', 'Casper', 'Pip', 'Bean', 'Sprout', 'Nibble', 'Puff'];
+  const a = first[Math.floor(Math.random() * first.length)];
+  const b = second[Math.floor(Math.random() * second.length)];
+  return `${a}${b}`.slice(0, 16);
+}
 
 export function formatClock(seconds: number): string {
   const clamped = Math.max(0, seconds);

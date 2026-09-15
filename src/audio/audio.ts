@@ -246,6 +246,48 @@ export class GameAudio {
     cleanup(panner, now + 0.4, ctx);
   }
 
+  /** A short chirp for an emote, positioned at whoever played it. */
+  emote(kind: string, x: number, z: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || this.muted) return;
+    const now = ctx.currentTime;
+    const panner = this.panner(x, z, 4, 36);
+    if (!panner) return;
+    panner.connect(this.master);
+
+    // Each feeling gets its own little motif.
+    const motifs: Record<string, { notes: number[]; type: OscillatorType; step: number }> = {
+      surprise: { notes: [520, 880], type: 'triangle', step: 0.09 },
+      angry: { notes: [220, 175, 147], type: 'sawtooth', step: 0.1 },
+      sad: { notes: [392, 330, 262], type: 'sine', step: 0.16 },
+      scared: { notes: [660, 590, 660, 590], type: 'sine', step: 0.08 },
+      scream: { notes: [1200, 900, 1400, 700], type: 'square', step: 0.07 },
+      annoyed: { notes: [330, 294], type: 'sawtooth', step: 0.12 },
+      love: { notes: [523, 659, 784], type: 'triangle', step: 0.11 },
+      tease: { notes: [740, 494, 740, 494], type: 'square', step: 0.08 },
+    };
+    const motif = motifs[kind] ?? motifs.surprise;
+
+    motif.notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = motif.type;
+      osc.frequency.value = freq;
+      const gain = ctx.createGain();
+      const start = now + i * motif.step;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.1, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + motif.step + 0.12);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2600;
+      osc.connect(filter).connect(gain).connect(panner);
+      osc.start(start);
+      osc.stop(start + motif.step + 0.16);
+    });
+
+    cleanup(panner, now + 1.2, ctx);
+  }
+
   /** Round-end stinger. */
   stinger(win: boolean): void {
     const ctx = this.ctx;

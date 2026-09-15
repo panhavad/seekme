@@ -19,9 +19,17 @@
         <div class="hud-top">
           <div class="hud-chip" id="hud-role"><span class="dot"></span><span id="hud-role-text">Hider</span></div>
           <div class="hud-timer" id="hud-timer">02:00</div>
-          <button class="hud-chip ghost-btn" id="btn-pause" type="button">Menu</button>
+          <button class="icon-btn" id="btn-pause" type="button" title="Pause (Esc)" aria-label="Pause">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <rect x="6" y="4" width="4.4" height="16" rx="1.4" fill="currentColor" />
+              <rect x="13.6" y="4" width="4.4" height="16" rx="1.4" fill="currentColor" />
+            </svg>
+          </button>
         </div>
         <div class="hud-objective" id="hud-objective">Stay hidden until the clock runs out.</div>
+        <div class="minimap" id="minimap" aria-hidden="true">
+          <canvas id="minimap-canvas"></canvas>
+        </div>
         <div class="hud-bottom">
           <div class="hud-meter" id="hud-meter">
             <span class="meter-label" id="hud-meter-label">Chill trail</span>
@@ -29,6 +37,18 @@
           </div>
           <div class="hud-alerts" id="hud-alerts"></div>
         </div>
+        <button class="skill-btn" id="btn-skill" type="button" title="Wall skip (Space)" aria-label="Wall skip">
+          <span class="skill-ring" id="skill-ring"></span>
+          <span class="skill-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22">
+              <path d="M4 5v14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none" />
+              <path d="M20 5v14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none" opacity="0.45" />
+              <path d="M8 12h8m0 0-3.2-3.2M16 12l-3.2 3.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+          </span>
+          <span class="skill-timer" id="skill-timer">22s</span>
+        </button>
+        <div class="emote-bar" id="emote-bar"></div>
         <div class="joystick" id="joystick" aria-hidden="true"><i id="joystick-knob"></i></div>
       </div>
 
@@ -46,6 +66,7 @@
             <button class="tab" data-tab="online" type="button" role="tab">Online</button>
             <button class="tab" data-tab="board" type="button" role="tab">Leaderboard</button>
             <button class="tab" data-tab="how" type="button" role="tab">How to play</button>
+            <button class="tab" data-tab="settings" type="button" role="tab">Settings</button>
           </div>
 
           <section class="tab-panel active" data-panel="play">
@@ -86,6 +107,14 @@
               Play a private match with a friend. One of you hosts and shares the code, the other
               types it in — only a few hundred bytes a second cross the wire.
             </p>
+
+            <label class="field">
+              <span>Your ghost name</span>
+              <div class="join-row">
+                <input id="input-online-name" type="text" maxlength="16" placeholder="Boo" autocomplete="nickname" />
+                <button class="ghost-btn" id="btn-reroll-name" type="button" title="Random name">🎲</button>
+              </div>
+            </label>
 
             <div class="field">
               <span>Host a game</span>
@@ -141,11 +170,49 @@
               <li><b class="warm">Seeker heat:</b> the lantern scorches stone. Stones glow red where the seeker lingered, and fade as they cool.</li>
               <li><b class="cold">Hider frost:</b> the cold ghost leaves blue footprints that deepen the longer it stands still.</li>
               <li><b>Melt ponds:</b> stand still too long as the hider and the frost melts into a <b>permanent</b> puddle.</li>
+              <li><b>Wall skip:</b> tap <kbd>Space</kbd> (or the ⇥ button) to slip through a single wall. It is a slow charge — it winds back up faster while you keep walking, and barely at all while you loiter.</li>
               <li><b>Splash!</b> Any ghost stepping in a pond makes a sound both sides can hear and locate.</li>
+              <li><b>Emotes:</b> tap the pad in the top-right (or press <kbd>1</kbd>–<kbd>8</kbd>) to throw a feeling — 😲 😠 😢 😨 😱 😤 😍 😝 — at your friend.</li>
               <li><b>Win:</b> hiders survive the clock, seekers catch the hider as fast as possible.</li>
               <li><b>Offline:</b> play with no connection; scores queue up and sync to the leaderboard when you reconnect.</li>
               <li><b>Online:</b> open the <b>Online</b> tab, create a code and share it — your friend types it in and you play the same maze together.</li>
+              <li><b>Themes:</b> dress the maze as an old temple, a garden park or a neon city in <b>Settings</b>. Looks only — the maze and the rules never change.</li>
             </ul>
+          </section>
+
+          <section class="tab-panel" data-panel="settings">
+            <div class="field">
+              <span>Maze theme</span>
+              <div class="choices themes" id="choice-theme"></div>
+              <p class="hint">
+                Pure decoration: the walls, ground and lights change, the maze and the
+                rules do not. Picked themes stick on this device.
+              </p>
+            </div>
+
+            <div class="field">
+              <span>Brightness</span>
+              <div class="slider-row">
+                <span class="slider-icon dim" aria-hidden="true">☾</span>
+                <input
+                  id="input-brightness"
+                  class="slider"
+                  type="range"
+                  data-setting="brightness"
+                  min="0.8"
+                  max="1.35"
+                  step="0.05"
+                  value="1"
+                  aria-label="Brightness"
+                />
+                <span class="slider-icon bright" aria-hidden="true">☀</span>
+                <output class="slider-value" data-setting-value="brightness">100%</output>
+              </div>
+              <p class="hint slider-hint">
+                Lifts the whole maze for sunny days and dim phone screens. Kept inside a safe
+                range so the night never turns black or washes out.
+              </p>
+            </div>
           </section>
         </div>
         <footer class="version" id="app-version"></footer>
@@ -177,7 +244,27 @@
       <!-- ============================ Pause overlay =========================== -->
       <div id="pause" class="screen hidden">
         <div class="panel small">
-          <h2>Paused</h2>
+          <h2 id="pause-title">Paused</h2>
+          <p id="pause-note" class="hint">The maze holds its breath.</p>
+          <div class="field pause-setting">
+            <span>Brightness</span>
+            <div class="slider-row">
+              <span class="slider-icon dim" aria-hidden="true">☾</span>
+              <input
+                id="input-brightness-pause"
+                class="slider"
+                type="range"
+                data-setting="brightness"
+                min="0.8"
+                max="1.35"
+                step="0.05"
+                value="1"
+                aria-label="Brightness"
+              />
+              <span class="slider-icon bright" aria-hidden="true">☀</span>
+              <output class="slider-value" data-setting-value="brightness">100%</output>
+            </div>
+          </div>
           <div class="result-actions">
             <button class="primary" id="btn-resume" type="button">Resume</button>
             <button class="ghost-btn" id="btn-quit" type="button">Quit to menu</button>
@@ -186,6 +273,7 @@
       </div>
 
       <div id="toast" class="toast hidden"></div>
+      <div id="emote-stage" class="emote-stage" aria-hidden="true"></div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

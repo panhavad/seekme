@@ -4,8 +4,9 @@ import type { TrailField } from '../core/trails';
 import { TILE, WALL_HEIGHT } from '../game/config';
 import { createFloorMaterial, createWallMaterial } from './materials';
 import { createSharedUniforms, type SharedUniforms } from './uniforms';
+import { getTheme, type Theme } from './themes';
 
-/** Builds and maintains the visible maze: cobbles, walls and the trail texture. */
+/** Builds and maintains the visible maze: ground, walls and the trail texture. */
 export class WorldView {
   readonly shared: SharedUniforms;
   readonly fieldTexture: THREE.DataTexture;
@@ -15,7 +16,7 @@ export class WorldView {
   private readonly meshes: THREE.Object3D[] = [];
   private readonly disposables: Array<{ dispose(): void }> = [];
 
-  constructor(scene: THREE.Scene, maze: Maze, field: TrailField) {
+  constructor(scene: THREE.Scene, maze: Maze, field: TrailField, theme: Theme = getTheme(null)) {
     this.scene = scene;
     this.field = field;
 
@@ -32,13 +33,13 @@ export class WorldView {
     this.fieldTexture.wrapT = THREE.ClampToEdgeWrapping;
     this.fieldTexture.needsUpdate = true;
 
-    this.shared = createSharedUniforms(this.fieldTexture);
+    this.shared = createSharedUniforms(this.fieldTexture, theme);
     this.shared.uGridOrigin.value.set((-maze.width * TILE) / 2, (-maze.height * TILE) / 2);
     this.shared.uGridSize.value.set(maze.width * TILE, maze.height * TILE);
 
     // ---- ground ---------------------------------------------------------
     const floorGeometry = new THREE.PlaneGeometry(maze.width * TILE, maze.height * TILE, 1, 1);
-    const floorMaterial = createFloorMaterial(this.shared);
+    const floorMaterial = createFloorMaterial(this.shared, theme);
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
@@ -52,7 +53,7 @@ export class WorldView {
     }
 
     const wallGeometry = new THREE.BoxGeometry(TILE, WALL_HEIGHT, TILE);
-    const wallMaterial = createWallMaterial(this.shared);
+    const wallMaterial = createWallMaterial(this.shared, theme);
     const walls = new THREE.InstancedMesh(wallGeometry, wallMaterial, wallCells.length);
     walls.frustumCulled = false;
 

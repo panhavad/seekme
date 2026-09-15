@@ -4,6 +4,7 @@ data
 .git
 .gitignore
 *.md
+docs
 .vscode
 .idea
 npm-debug.log*

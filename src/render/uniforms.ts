@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getTheme, type Theme } from './themes';
 
 /**
  * Uniforms shared by the floor and wall materials. Both need the trail field,
@@ -23,23 +24,28 @@ export interface SharedUniforms {
   uAmbient: { value: THREE.Color };
 }
 
-export function createSharedUniforms(field: THREE.DataTexture): SharedUniforms {
+export function createSharedUniforms(field: THREE.DataTexture, theme: Theme = getTheme(null)): SharedUniforms {
   return {
     uTime: { value: 0 },
     uField: { value: field },
     uGridOrigin: { value: new THREE.Vector2() },
     uGridSize: { value: new THREE.Vector2(1, 1) },
     uFocus: { value: new THREE.Vector3() },
-    uFadeRadius: { value: 1.9 },
+    // Kept just wide enough to clear the ghost's silhouette: a bigger hole ate
+    // whole walls whenever the player slipped behind one.
+    uFadeRadius: { value: 1.45 },
     uLampPos: { value: new THREE.Vector3(0, 1, 0) },
     uLampColor: { value: new THREE.Color(0xffb257) },
-    uLampPower: { value: 1.6 },
+    uLampPower: { value: 1.95 },
     uLampRange: { value: 28 },
     uWispPos: { value: new THREE.Vector3(0, 1, 0) },
     uWispColor: { value: new THREE.Color(0x6fd8ff) },
-    uWispPower: { value: 1.6 },
+    uWispPower: { value: 1.9 },
     uWispRange: { value: 23 },
-    uAmbient: { value: new THREE.Color(0x3a4673) },
+    // Fill light for the stones. Bright enough that surfaces stay readable on a
+    // phone in daylight; the theme decides whether it reads as moonlight,
+    // garden dusk or city glare.
+    uAmbient: { value: new THREE.Color(theme.shaderAmbient) },
   };
 }
 

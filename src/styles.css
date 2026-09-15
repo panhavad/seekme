@@ -152,6 +152,7 @@ body {
 /* -------------------------------- tabs ---------------------------------- */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 16px;
   padding: 4px;
@@ -162,7 +163,7 @@ body {
 }
 
 .tab {
-  flex: 1;
+  flex: 1 1 84px;
   background: none;
   border: none;
   border-radius: 10px;
@@ -225,6 +226,93 @@ input[type='text']:focus {
   box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.8), 0 0 0 3px rgba(255, 178, 87, 0.18);
 }
 
+/* ------------------------------- sliders --------------------------------- */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider-icon {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.slider-icon.bright {
+  color: var(--warm);
+}
+
+.slider-value {
+  min-width: 46px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 26px;
+  background: none;
+  outline: none;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(120, 132, 180, 0.45), var(--warm));
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75);
+}
+
+.slider::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(120, 132, 180, 0.45), var(--warm));
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 233, 196, 0.5);
+  background: linear-gradient(180deg, #ffe0ad, var(--warm));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 150, 60, 0.35);
+}
+
+.slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 233, 196, 0.5);
+  background: linear-gradient(180deg, #ffe0ad, var(--warm));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 150, 60, 0.35);
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(255, 178, 87, 0.3);
+}
+
+.slider-hint {
+  margin-top: 8px;
+}
+
+/* The pause dialog keeps the slider clear of the "paused" note above it. */
+.pause-setting {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--edge);
+  text-align: left;
+}
+
 .choices {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -233,6 +321,32 @@ input[type='text']:focus {
 
 .choices.compact {
   grid-template-columns: repeat(3, 1fr);
+}
+
+/* Theme picker: one column so the swatch, name and blurb stay readable. */
+.choices.themes {
+  grid-template-columns: 1fr;
+}
+
+.theme-choice {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+}
+
+.theme-swatch {
+  grid-row: 1 / span 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 233, 196, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+.theme-choice small {
+  margin-top: 1px;
 }
 
 .choice {
@@ -676,6 +790,321 @@ kbd {
   pointer-events: auto;
 }
 
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 233, 196, 0.18);
+  background: linear-gradient(180deg, rgba(56, 54, 70, 0.85), rgba(14, 14, 22, 0.92));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 4px 0 -1px rgba(4, 4, 8, 0.9),
+    0 8px 18px rgba(0, 0, 0, 0.5);
+  transition: transform 90ms ease, box-shadow 90ms ease, border-color 150ms ease;
+}
+
+.icon-btn:hover {
+  border-color: rgba(255, 178, 87, 0.75);
+}
+
+.icon-btn:active {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 -1px rgba(4, 4, 8, 0.9);
+}
+
+/* ------------------------------- emotes --------------------------------- */
+.emote-bar {
+  position: absolute;
+  /* Parked in the top-right corner, under the pause button, where a thumb can
+     reach it without covering the maze or the centred wall-skip button. */
+  right: 14px;
+  top: calc(64px + env(safe-area-inset-top));
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 6px;
+  padding: 6px;
+  border-radius: 22px;
+  background: rgba(8, 8, 14, 0.72);
+  border: 1px solid rgba(255, 233, 196, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+
+.emote-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.emote-btn:hover {
+  transform: translateY(-3px) scale(1.08);
+  background: rgba(255, 178, 87, 0.18);
+}
+
+.emote-btn:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.emote-btn small {
+  display: none;
+}
+
+/* --------------------------- emote reactions ----------------------------- */
+.emote-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  overflow: hidden;
+}
+
+.emote-pop {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, -50%);
+  animation: emote-burst 1900ms cubic-bezier(0.2, 1.3, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.emote-pop.mine {
+  top: auto;
+  bottom: 22%;
+  animation-duration: 1500ms;
+}
+
+.emote-pop i {
+  font-style: normal;
+  font-size: 94px;
+  line-height: 1;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.8));
+}
+
+.emote-pop.mine i {
+  font-size: 62px;
+}
+
+.emote-pop b {
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #10101a;
+  background: currentColor;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+/* The flash behind the glyph, tinted per feeling. */
+.emote-pop::before {
+  content: '';
+  position: absolute;
+  top: 42px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(circle, currentColor 0%, transparent 62%);
+  opacity: 0.4;
+  transform: translateY(-50%);
+  animation: emote-flash 900ms ease-out forwards;
+}
+
+@keyframes emote-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2) rotate(-22deg);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.45) rotate(10deg);
+  }
+  32% {
+    transform: translate(-50%, -50%) scale(0.88) rotate(-7deg);
+  }
+  45% {
+    transform: translate(-50%, -50%) scale(1.16) rotate(4deg);
+  }
+  58% {
+    transform: translate(-50%, -50%) scale(0.97) rotate(-2deg);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -115%) scale(1.1) rotate(0deg);
+  }
+}
+
+@keyframes emote-flash {
+  0% {
+    opacity: 0.65;
+    transform: translateY(-50%) scale(0.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50%) scale(1.35);
+  }
+}
+
+/* Confetti-ish sparkles thrown out of the popup. */
+.emote-spark {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0;
+  animation: emote-spark 1100ms ease-out forwards;
+}
+
+@keyframes emote-spark {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(0.35) rotate(var(--spin));
+  }
+}
+
+/* ------------------------------ wall skip -------------------------------- */
+.skill-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  /* Centre stage: the skill is the one button players hunt for mid-chase. */
+  transform: translateX(-50%);
+  width: 74px;
+  height: 74px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 233, 196, 0.16);
+  background: rgba(8, 8, 14, 0.72);
+  color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 120ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.skill-ring {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  /* --charge is 0..1 and drives the sweep of the cooldown dial. */
+  background: conic-gradient(
+    var(--cold) calc(var(--charge, 0) * 360deg),
+    rgba(255, 255, 255, 0.08) 0
+  );
+  -webkit-mask: radial-gradient(circle, transparent 60%, #000 62%);
+  mask: radial-gradient(circle, transparent 60%, #000 62%);
+  transition: background 140ms linear;
+}
+
+#hud.seeker .skill-ring {
+  background: conic-gradient(
+    var(--warm) calc(var(--charge, 0) * 360deg),
+    rgba(255, 255, 255, 0.08) 0
+  );
+}
+
+.skill-glyph {
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.skill-timer {
+  position: absolute;
+  bottom: 9px;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.skill-btn.ready {
+  color: #fff;
+  border-color: rgba(111, 216, 255, 0.55);
+  animation: skill-pulse 1.8s ease-in-out infinite;
+}
+
+#hud.seeker .skill-btn.ready {
+  border-color: rgba(255, 178, 87, 0.55);
+}
+
+.skill-btn.ready .skill-timer {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.skill-btn.charging .skill-timer {
+  color: var(--cold);
+}
+
+#hud.seeker .skill-btn.charging .skill-timer {
+  color: var(--warm);
+}
+
+.skill-btn:active {
+  transform: translateX(-50%) scale(0.94);
+}
+
+@keyframes skill-pulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  }
+  50% {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 0 18px rgba(140, 220, 255, 0.45);
+  }
+}
+
+@media (max-width: 560px) {
+  .skill-btn {
+    width: 62px;
+    height: 62px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .skill-timer {
+    bottom: 6px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 560px) {
+  .emote-btn {
+    width: 38px;
+    height: 38px;
+    font-size: 19px;
+  }
+
+  .emote-bar {
+    right: 10px;
+    top: calc(58px + env(safe-area-inset-top));
+    gap: 5px;
+    padding: 5px;
+  }
+}
+
 .hud-chip .dot {
   width: 9px;
   height: 9px;
@@ -712,6 +1141,27 @@ kbd {
   color: var(--muted);
   text-align: center;
   text-shadow: 0 2px 10px #000;
+}
+
+/* ------------------------------- minimap -------------------------------- */
+.minimap {
+  position: absolute;
+  left: 14px;
+  top: calc(64px + env(safe-area-inset-top));
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 42%, rgba(24, 26, 40, 0.72), rgba(6, 6, 11, 0.86));
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.75), 0 8px 20px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.minimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .hud-bottom {
@@ -853,5 +1303,12 @@ kbd {
 
   .hud-timer {
     font-size: 23px;
+  }
+
+  .minimap {
+    left: 10px;
+    top: calc(58px + env(safe-area-inset-top));
+    width: 116px;
+    height: 116px;
   }
 }

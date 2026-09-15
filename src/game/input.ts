@@ -30,11 +30,14 @@ export class InputController {
     if (!value) this.reset();
   }
 
-  /** Extra key handlers (pause, mute, …). */
-  onAction: ((action: 'pause' | 'mute') => void) | null = null;
+  /** Extra key handlers (pause, mute, wall skip, emotes…). */
+  onAction: ((action: 'pause' | 'mute' | 'skill') => void) | null = null;
+  onEmoteKey: ((index: number) => void) | null = null;
 
   private onKeyDown = (event: KeyboardEvent): void => {
     if (event.repeat) return;
+    // Keys aimed at a field or a slider belong to that control, not the ghost.
+    if ((event.target as HTMLElement | null)?.closest('input, textarea, select')) return;
     const key = event.key.toLowerCase();
     if (key === 'escape') {
       this.onAction?.('pause');
@@ -42,6 +45,15 @@ export class InputController {
     }
     if (key === 'm') {
       this.onAction?.('mute');
+      return;
+    }
+    if (SKILL_KEYS.has(key)) {
+      event.preventDefault();
+      this.onAction?.('skill');
+      return;
+    }
+    if (key >= '1' && key <= '8') {
+      this.onEmoteKey?.(Number(key) - 1);
       return;
     }
     if (MOVE_KEYS.has(key)) {
@@ -150,6 +162,9 @@ const MOVE_KEYS = new Set([
   'arrowleft',
   'arrowright',
 ]);
+
+/** Keys that fire the wall skip. Space is the primary, F the alternative. */
+const SKILL_KEYS = new Set([' ', 'spacebar', 'f']);
 
 const SIN45 = Math.SQRT1_2;
 

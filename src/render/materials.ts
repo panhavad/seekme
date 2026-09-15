@@ -1,11 +1,25 @@
 import * as THREE from 'three';
 import { GLSL_COMMON, type SharedUniforms } from './uniforms';
+import { getTheme, type Theme } from './themes';
 
 /**
- * Wet cobblestones that remember every ghost: scorch marks glowing in the
- * mortar, frost creeping over the stones, and melt ponds that mirror the lamp.
+ * Colour that ground and walls drift toward once the ghost has walked away and
+ * only the memory of a corridor is left.
  */
-export function createFloorMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
+function glslMemoryTint(theme: Theme): string {
+  const [r, g, b] = theme.memoryTint;
+  return `const vec3 MEMORY_TINT = vec3(${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)});`;
+}
+
+/**
+ * Ground that remembers every ghost: scorch marks glowing in the seams, frost
+ * creeping over the surface, and melt ponds that mirror the lamp. The theme
+ * supplies the surface itself - cobbles, lawn or wet asphalt.
+ */
+export function createFloorMaterial(
+  shared: SharedUniforms,
+  theme: Theme = getTheme(null)
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: shared as unknown as Record<string, THREE.IUniform>,
     vertexShader: /* glsl */ `
@@ -18,33 +32,29 @@ export function createFloorMaterial(shared: SharedUniforms): THREE.ShaderMateria
     `,
     fragmentShader: /* glsl */ `
       ${GLSL_COMMON}
+      ${glslMemoryTint(theme)}
+      ${theme.floorGlsl}
       varying vec3 vWorldPos;
 
       void main() {
         vec2 world = vWorldPos.xz;
         vec4 field = sampleField(world);
 
-        // --- cobblestones -------------------------------------------------
-        vec2 p = world * 1.45;
-        p.x += 0.5 * mod(floor(p.y), 2.0);
-        vec2 cell = floor(p);
-        vec2 f = fract(p) - 0.5;
-        float d = max(abs(f.x) * 1.02, abs(f.y) * 1.22);
-        float crack = smoothstep(0.34, 0.5, d);
-        float tone = 0.72 + 0.4 * hash21(cell);
-        float grain = 0.9 + 0.1 * valueNoise(world * 5.0);
-
-        vec3 stone = mix(vec3(0.088, 0.081, 0.073) * tone * grain, vec3(0.014, 0.014, 0.018), crack);
+        // --- themed ground ------------------------------------------------
+        float crack;
+        vec3 emissive;
+        vec3 surface = themeFloor(world, crack, emissive);
         vec3 normal = vec3(0.0, 1.0, 0.0);
 
-        vec3 col = stone * uAmbient * 3.0;
-        col += stone * ghostLights(vWorldPos, normal);
+        vec3 col = surface * uAmbient * 3.4;
+        col += surface * ghostLights(vWorldPos, normal);
+        col += emissive;
 
         // --- melt ponds ---------------------------------------------------
         float water = smoothstep(0.28, 0.72, field.b);
         if (water > 0.001) {
           float ripple = 0.5 + 0.5 * sin(length(world * 3.1) * 7.0 - uTime * 2.3 + valueNoise(world * 5.0) * 6.0);
-          vec3 waterCol = mix(vec3(0.014, 0.03, 0.055), vec3(0.03, 0.07, 0.12), ripple);
+          vec3 waterCol = mix(WATER_DEEP, WATER_SHINE, ripple);
           vec3 wobble = normalize(vec3(
             (valueNoise(world * 4.0 + uTime * 0.35) - 0.5) * 0.55,
             1.0,
@@ -67,10 +77,12 @@ export function createFloorMaterial(shared: SharedUniforms): THREE.ShaderMateria
 
         // --- what the ghost can actually see ------------------------------
         float light = field.a;
-        float seen = max(light, 0.18);
+        // Unseen ground keeps a readable floor instead of dropping to black:
+        // the contrast with lit tiles is what sells the fog, not pure darkness.
+        float seen = max(light, 0.26);
         col *= seen;
-        // remembered-but-unseen ground drifts toward cold moonlight
-        col = mix(col * vec3(0.55, 0.62, 0.95), col, smoothstep(0.0, 0.55, light));
+        // remembered-but-unseen ground drifts toward the theme's night colour
+        col = mix(col * MEMORY_TINT, col, smoothstep(0.0, 0.55, light));
 
         gl_FragColor = vec4(col, 1.0);
       }
@@ -78,8 +90,11 @@ export function createFloorMaterial(shared: SharedUniforms): THREE.ShaderMateria
   });
 }
 
-/** Alley walls: brickwork that scorches red where the lantern passed by. */
-export function createWallMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
+/** Maze walls: brick, hedge or lit facade, depending on the theme. */
+export function createWallMaterial(
+  shared: SharedUniforms,
+  theme: Theme = getTheme(null)
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: shared as unknown as Record<string, THREE.IUniform>,
     vertexShader: /* glsl */ `
@@ -101,19 +116,21 @@ export function createWallMaterial(shared: SharedUniforms): THREE.ShaderMaterial
     `,
     fragmentShader: /* glsl */ `
       ${GLSL_COMMON}
+      ${glslMemoryTint(theme)}
+      ${theme.wallGlsl}
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
       varying vec3 vViewPos;
 
       void main() {
-        // Dissolve walls that stand between the camera and the ghost.
-        // Dissolve the walls that stand between the camera and the ghost. Walls
-        // directly in front must clear completely, not just thin out.
+        // Dissolve the walls that stand between the camera and the ghost. Only
+        // a tight window around the ghost clears completely; the rest of the
+        // wall stays up so the maze still reads as solid.
         vec3 focusView = (viewMatrix * vec4(uFocus, 1.0)).xyz;
         float depthDelta = vViewPos.z - focusView.z;
         if (depthDelta > 0.25) {
           float r = length(vViewPos.xy - focusView.xy);
-          float fade = (1.0 - smoothstep(uFadeRadius * 0.8, uFadeRadius * 1.08, r))
+          float fade = (1.0 - smoothstep(uFadeRadius * 0.62, uFadeRadius, r))
             * smoothstep(0.25, 0.9, depthDelta);
           if (fade > bayer(gl_FragCoord.xy)) discard;
         }
@@ -136,27 +153,23 @@ export function createWallMaterial(shared: SharedUniforms): THREE.ShaderMaterial
         float heightFade = exp(-max(vWorldPos.y, 0.0) * 1.15);
         field.rg *= isTop ? 0.35 : heightFade;
 
-        // --- brickwork ----------------------------------------------------
+        // --- themed wall face ---------------------------------------------
         vec2 uv = abs(n.x) > 0.5 ? vec2(vWorldPos.z, vWorldPos.y) : vec2(vWorldPos.x, vWorldPos.y);
-        vec2 b = uv * vec2(1.7, 2.6);
-        b.x += 0.5 * mod(floor(b.y), 2.0);
-        vec2 bc = floor(b);
-        vec2 bf = fract(b) - 0.5;
-        float bd = max(abs(bf.x) * 1.0, abs(bf.y) * 1.35);
-        float mortar = smoothstep(0.36, 0.49, bd);
-        float tone = 0.68 + 0.42 * hash21(bc + 17.0);
-        float grime = 0.8 + 0.2 * valueNoise(uv * 7.0);
+        float mask;
+        vec3 emissive;
+        vec3 surface = themeWall(uv, vWorldPos, n, isTop, mask, emissive);
 
-        vec3 brick = mix(vec3(0.075, 0.066, 0.058) * tone * grime, vec3(0.016, 0.015, 0.018), mortar);
-        if (isTop) brick *= 0.55;
-
-        vec3 col = brick * uAmbient * 3.0;
-        col += brick * ghostLights(vWorldPos, n);
-        col += trailGlow(field, mortar, vWorldPos.xz);
+        vec3 col = surface * uAmbient * 3.4;
+        col += surface * ghostLights(vWorldPos, n);
+        col += trailGlow(field, mask, vWorldPos.xz);
 
         float light = field.a;
-        col *= max(light, 0.16);
-        col = mix(col * vec3(0.5, 0.58, 0.95), col, smoothstep(0.0, 0.55, light));
+        col *= max(light, 0.24);
+        col = mix(col * MEMORY_TINT, col, smoothstep(0.0, 0.55, light));
+        // Lit windows and signs are scenery rather than information about the
+        // ghosts, so they keep a little glow in the dark - but only a little,
+        // or the fog of war would stop hiding anything.
+        col += emissive * mix(0.3, 1.0, smoothstep(0.0, 0.6, light));
 
         gl_FragColor = vec4(col, 1.0);
       }

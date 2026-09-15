@@ -1,4 +1,4 @@
-import { APP_VERSION, type Difficulty, type Role } from '../game/config';
+import { APP_VERSION, randomGhostName, type Difficulty, type Role } from '../game/config';
 
 export interface ScoreSubmission {
   /** Stable id so retrying a submission can never double-post a score. */
@@ -44,17 +44,22 @@ const BOARD_CACHE_KEY = 'seekme.board.v1';
  */
 export class LeaderboardClient {
   private pending: ScoreSubmission[] = readJson<ScoreSubmission[]>(PENDING_KEY, []);
-  private identity = readJson<{ clientId: string; name: string }>(IDENTITY_KEY, {
+  private identity = readJson<{ clientId: string; name: string; custom?: boolean }>(IDENTITY_KEY, {
     clientId: makeId(),
     name: '',
-  });
-  private boards = readJson<Record<string, BoardRow[]>>(BOARD_CACHE_KEY, {});
+    custom: false,
+  });  private boards = readJson<Record<string, BoardRow[]>>(BOARD_CACHE_KEY, {});
   private inflight: Promise<SyncReport> | null = null;
   private serverReachable: boolean | null = null;
 
   onChange: (() => void) | null = null;
 
   constructor() {
+    // A fresh random ghost name every visit, unless the player picked their own.
+    if (!this.identity.custom || !this.identity.name) {
+      this.identity.name = randomGhostName();
+      this.identity.custom = false;
+    }
     writeJson(IDENTITY_KEY, this.identity);
     window.addEventListener('online', () => void this.sync());
     window.setInterval(() => {
@@ -70,9 +75,30 @@ export class LeaderboardClient {
     return this.identity.name;
   }
 
+  /** Typing a name keeps it; clearing it hands you back to the dice. */
   set playerName(value: string) {
-    this.identity.name = value.slice(0, 16);
+    const cleaned = value.trim().slice(0, 16);
+    if (cleaned) {
+      this.identity.name = cleaned;
+      this.identity.custom = true;
+    } else {
+      this.identity.name = randomGhostName();
+      this.identity.custom = false;
+    }
     writeJson(IDENTITY_KEY, this.identity);
+  }
+
+  /** Rolls a new random name and stays on random for future visits. */
+  rerollName(): string {
+    this.identity.name = randomGhostName();
+    this.identity.custom = false;
+    writeJson(IDENTITY_KEY, this.identity);
+    return this.identity.name;
+  }
+
+  /** True while the name is auto-generated rather than player-chosen. */
+  get nameIsRandom(): boolean {
+    return !this.identity.custom;
   }
 
   get pendingCount(): number {

@@ -7,6 +7,7 @@ import { makeRng, type Rng } from '../core/rng';
 import { WorldView } from '../render/world';
 import { Effects } from '../render/effects';
 import type { Stage } from '../render/stage';
+import { getTheme, type ThemeKey } from '../render/themes';
 import type { GameAudio } from '../audio/audio';
 import { InputController, screenToWorld } from './input';
 import { Ghost } from './entity';
@@ -19,11 +20,16 @@ import {
   TILE,
   TRAIL,
   VISION,
+  WALL_SKIP,
+  findEmote,
   rollMazeLayout,
   type Difficulty,
+  type EmoteKey,
   type MazeLayout,
   type Role,
 } from './config';
+import { EmoteBubble } from '../render/emote';
+import type { MinimapView } from '../ui/minimap';
 
 export interface RoundResult {
   role: Role;
@@ -46,6 +52,12 @@ export interface HudState {
   meterLabel: string;
   phase: RoundPhase;
   countdown: number;
+  /** Wall-skip charge: 0..1, plus the seconds still to wait. */
+  skillCharge: number;
+  skillReady: boolean;
+  skillSecondsLeft: number;
+  /** True while walking is speeding the recharge up. */
+  skillCharging: boolean;
 }
 
 export type RoundPhase = 'countdown' | 'running' | 'over';
@@ -55,6 +67,10 @@ export interface GameCallbacks {
   onHud(state: HudState): void;
   onAlert(text: string, kind: AlertKind): void;
   onEnd(result: RoundResult): void;
+  /** Fired when the leader pauses or resumes an online match. */
+  onRemotePause?(paused: boolean): void;
+  /** Fired whenever a ghost plays an emote, for the on-screen reaction. */
+  onEmote?(glyph: string, who: string, colour: string, mine: boolean): void;
 }
 
 export interface GameOptions {
@@ -67,6 +83,12 @@ export interface GameOptions {
   online?: OnlineLink | null;
   /** Name shown for the other player. */
   peerName?: string;
+  /** The leader owns pausing and the authoritative round clock. */
+  isLeader?: boolean;
+  /** Our own display name, used in emote call-outs. */
+  playerName?: string;
+  /** Which dressing the maze wears. Defaults to the original temple. */
+  theme?: ThemeKey;
 }
 
 /** The slice of the online session the game itself needs. */
@@ -133,6 +155,22 @@ export class Game {
   private readonly remoteSamples: RemoteSample[] = [];
   private stateTimer = 0;
   private peerGone = false;
+  private readonly isLeader: boolean;
+  private readonly peerName: string;
+  private readonly playerBubble: EmoteBubble;
+  private readonly rivalBubble: EmoteBubble;
+  private emoteCooldown = 0;
+  private clockTimer = 0;
+  private remotePause = false;
+  /** Seconds left before the wall skip can be used again. */
+  private skillCooldown = 0;
+  /** Seconds of unbroken walking, which speeds the recharge up. */
+  private walkStreak = 0;
+  private skillRecharging = false;
+  /** Latest rival visibility (0..1), shared with the HUD minimap. */
+  private lastRivalSeen = 0;
+  /** The theme's tint for remembered ground, mirrored on the minimap. */
+  private readonly memoryTint: [number, number, number];
 
   constructor(
     stage: Stage,
@@ -160,8 +198,12 @@ export class Game {
     );
     this.field = new TrailField(this.maze);
     this.visibility = this.field.visible;
-    this.world = new WorldView(stage.scene, this.maze, this.field);
-    this.effects = new Effects(stage.scene);
+    // The theme only dresses the maze: same layout, same rules, new scenery.
+    const theme = getTheme(options.theme);
+    this.memoryTint = theme.memoryTint;
+    stage.setTheme(theme);
+    this.world = new WorldView(stage.scene, this.maze, this.field, theme);
+    this.effects = new Effects(stage.scene, theme);
 
     const hider = new Ghost('hider', this.maze);
     const seeker = new Ghost('seeker', this.maze);
@@ -176,6 +218,10 @@ export class Game {
       : null;
 
     this.online = options.online ?? null;
+    this.isLeader = options.isLeader ?? true;
+    this.peerName = options.peerName ?? 'Your rival';
+    this.playerBubble = new EmoteBubble(stage.scene);
+    this.rivalBubble = new EmoteBubble(stage.scene);
     if (this.online) {
       // Online rivals move at full speed - no AI handicap.
       this.rival.speedScale = 1;
@@ -239,9 +285,31 @@ export class Game {
     }
   }
 
+  /**
+   * Pausing is leader-authoritative online: the leader pauses both sides, and a
+   * guest's request is forwarded so the leader can honour it.
+   */
   setPaused(value: boolean): void {
+    if (this.online && !this.isLeader) {
+      // Guests never change the pause state themselves: they ask, then mirror
+      // whatever the leader broadcasts. That keeps both clocks identical.
+      if (value) this.online.sendEvent({ e: 'pauseRequest' });
+      return;
+    }
+    this.applyPaused(value);
+    if (this.online && this.isLeader) {
+      this.online.sendEvent({ e: 'pause', paused: value, t: Math.round(this.elapsed * 1000) });
+    }
+  }
+
+  private applyPaused(value: boolean): void {
     this.paused = value;
     this.input.setEnabled(!value && !this.options.autoPlay && this.phase !== 'over');
+  }
+
+  /** True while the round is paused by the other player. */
+  get pausedByPeer(): boolean {
+    return this.remotePause;
   }
 
   get isOver(): boolean {
@@ -264,6 +332,9 @@ export class Game {
       coldHere: this.field.coldAt(this.player.cellX, this.player.cellY),
       ponds,
       pondsMelted: this.pondsMelted,
+      skillCooldown: this.skillCooldown,
+      walkStreak: this.walkStreak,
+      skipTarget: this.findSkipTarget(),
       aiState: this.ai.debug.state,
     };
   }
@@ -287,6 +358,8 @@ export class Game {
     this.updateLights();
     this.stage.update(step);
     this.effects.update(step, this.focus.x, this.focus.z);
+    this.playerBubble.update(step, this.player.position.x, this.player.position.z);
+    this.rivalBubble.update(step, this.rival.position.x, this.rival.position.z);
     this.world.update(this.time, this.focus, this.lampPos, this.wispPos);
     this.stage.render();
   }
@@ -327,6 +400,9 @@ export class Game {
     this.depositTrail(this.rival, dt);
     this.field.decay(dt);
 
+    // ---- wall skip ------------------------------------------------------
+    this.rechargeSkill(dt, playerMoved);
+
     // ---- ponds ----------------------------------------------------------
     this.updatePonds(this.player, dt, playerMoved, true);
     this.updatePonds(this.rival, dt, rivalMoved, false);
@@ -334,7 +410,20 @@ export class Game {
     // ---- senses ---------------------------------------------------------
     this.refreshVisibility();
     const rivalSeen = this.rivalVisibility();
+    this.lastRivalSeen = rivalSeen;
     this.rival.rig.setOpacity(rivalSeen);
+    // A bubble over the rival only shows when we can actually see them.
+    this.rivalBubble.setVisibility(Math.max(rivalSeen, 0.15));
+    this.emoteCooldown = Math.max(0, this.emoteCooldown - dt);
+
+    // The leader keeps both clocks honest.
+    if (this.online && this.isLeader && this.phase === 'running') {
+      this.clockTimer -= dt;
+      if (this.clockTimer <= 0) {
+        this.clockTimer = 2;
+        this.online.sendEvent({ e: 'clock', t: Math.round(this.elapsed * 1000) });
+      }
+    }
 
     const distance = this.player.position.distanceTo(this.rival.position);
     const tiles = distance / TILE;
@@ -381,6 +470,35 @@ export class Game {
   }
 
   private receivePeerEvent(event: PeerEvent): void {
+    if (event.e === 'pause') {
+      // The leader is in charge of the clock as well as the pause state.
+      this.remotePause = event.paused;
+      this.elapsed = event.t / 1000;
+      this.applyPaused(event.paused);
+      this.callbacks.onRemotePause?.(event.paused);
+      this.callbacks.onAlert(
+        event.paused ? `${this.peerName} paused the game.` : `${this.peerName} resumed the game.`,
+        'info'
+      );
+      return;
+    }
+
+    if (event.e === 'pauseRequest') {
+      // Only the leader acts on this: it pauses both sides and tells its own UI,
+      // which would otherwise never learn about a pause it did not initiate.
+      if (this.isLeader && !this.paused) {
+        this.setPaused(true);
+        this.callbacks.onRemotePause?.(true);
+        this.callbacks.onAlert(`${this.peerName} asked to pause.`, 'info');
+      }
+      return;
+    }
+
+    if (event.e === 'clock') {
+      this.syncClock(event.t / 1000);
+      return;
+    }
+
     if (this.phase === 'over') return;
 
     switch (event.e) {
@@ -392,6 +510,12 @@ export class Game {
       case 'pond':
         this.field.addPond(event.cx, event.cy);
         break;
+      case 'emote':
+        this.showEmote(event.k, false);
+        break;
+      case 'skip':
+        this.receivePeerSkip(event.x, event.z, event.fx, event.fz);
+        break;
       case 'caught':
         // The seeker called it: whoever is hiding has just lost.
         this.finish(this.player.role === 'seeker');
@@ -402,6 +526,190 @@ export class Game {
       default:
         break;
     }
+  }
+
+  /** Nudges our round clock toward the leader's without visible jumps. */  private syncClock(leaderElapsed: number): void {
+    const drift = leaderElapsed - this.elapsed;
+    if (Math.abs(drift) > 1.5) this.elapsed = leaderElapsed;
+    else this.elapsed += drift * 0.25;
+  }
+
+  /** The other player skipped a wall: snap them over instead of sliding. */
+  private receivePeerSkip(x: number, z: number, fromX: number, fromZ: number): void {
+    this.remoteSamples.length = 0;
+    this.rival.applyRemote(x, z, this.rival.facing, false, 0);
+
+    const colour = this.rival.role === 'seeker' ? COLORS.warm : COLORS.cold;
+    this.effects.ping(fromX, fromZ, colour);
+    this.effects.splash(x, z, colour);
+
+    const tiles = Math.hypot(x - this.player.position.x, z - this.player.position.z) / TILE;
+    if (tiles < 14) {
+      this.audio.melt(x, z);
+      this.callbacks.onAlert(`${this.peerName} slipped through a wall nearby!`, 'danger');
+    }
+  }
+
+  /** Plays an emote for one of the ghosts and tells the HUD about it. */
+  showEmote(key: string, mine: boolean): void {
+    const emote = findEmote(key);
+    if (!emote) return;
+
+    const ghost = mine ? this.player : this.rival;
+    const bubble = mine ? this.playerBubble : this.rivalBubble;
+    bubble.play(emote);
+    this.audio.emote(emote.key, ghost.position.x, ghost.position.z);
+    this.effects.emoteBurst(ghost.position.x, ghost.position.z, hexOf(emote.colour));
+    // A little kick of camera punch on the loud ones.
+    if (emote.key === 'scream' || emote.key === 'angry') this.stage.shake(0.18);
+
+    const who = mine ? 'You' : this.peerName;
+    const line = mine ? emote.selfShout : emote.shout;
+    this.callbacks.onEmote?.(emote.glyph, mine ? 'You' : this.peerName, emote.colour, mine);
+    this.callbacks.onAlert(`${emote.glyph}  ${who} ${line}`, 'info');
+  }
+
+  /** Called by the HUD / hotkeys: play an emote and share it. */
+  sendEmote(key: EmoteKey): void {
+    if (this.emoteCooldown > 0 || this.phase === 'over') return;
+    this.emoteCooldown = 0.75;
+    this.showEmote(key, true);
+    this.online?.sendEvent({ e: 'emote', k: key });
+  }
+
+  // ------------------------------------------------------------- wall skip
+  /** Charge (0..1), whether it is usable, and the wait still to go. */
+  get skillStatus(): { charge: number; ready: boolean; secondsLeft: number; charging: boolean } {
+    const secondsLeft = this.skillCooldown;
+    return {
+      charge: 1 - Math.min(1, secondsLeft / WALL_SKIP.cooldownSeconds),
+      ready: secondsLeft <= 0,
+      secondsLeft,
+      charging: this.skillRecharging,
+    };
+  }
+
+  /**
+   * Walking winds the skill back up; loitering barely does. The bonus is
+   * capped so even a full-speed lap never makes it feel spammable.
+   */
+  private rechargeSkill(dt: number, moved: boolean): void {
+    if (moved) {
+      this.walkStreak = Math.min(WALL_SKIP.streakCap, this.walkStreak + dt);
+    } else {
+      this.walkStreak = Math.max(0, this.walkStreak - dt * WALL_SKIP.streakDecay);
+    }
+    if (this.skillCooldown <= 0) {
+      this.skillRecharging = false;
+      return;
+    }
+
+    const bonus = Math.min(WALL_SKIP.maxWalkBonus, this.walkStreak * WALL_SKIP.walkRamp);
+    const rate = moved ? WALL_SKIP.walkRate + bonus : WALL_SKIP.idleRate;
+    this.skillCooldown = Math.max(0, this.skillCooldown - dt * rate);
+    this.skillRecharging = moved;
+
+    if (this.skillCooldown <= 0) {
+      this.audio.blip(true);
+      this.callbacks.onAlert('Wall skip is ready again.', 'info');
+    }
+  }
+
+  /**
+   * Slips the player through the single wall they are facing. Returns false
+   * (with a nudge in the HUD) when it is still charging or there is nothing
+   * but solid rock on the other side.
+   */
+  useWallSkip(): boolean {
+    if (this.phase !== 'running' || this.paused || this.options.autoPlay) return false;
+
+    if (this.skillCooldown > 0) {
+      this.alertOnce(
+        'skip-cooling',
+        `Wall skip needs ${Math.ceil(this.skillCooldown)}s more — keep walking to charge it.`,
+        'info',
+        1.5
+      );
+      this.audio.blip(false);
+      return false;
+    }
+
+    const target = this.findSkipTarget();
+    if (!target) {
+      this.alertOnce('skip-blocked', 'Solid rock all around — walk on and try again.', 'info', 1.5);
+      this.audio.blip(false);
+      return false;
+    }
+
+    const fromX = this.player.position.x;
+    const fromZ = this.player.position.z;
+    this.player.placeAtCell(target.cx, target.cy);
+    this.skillCooldown = WALL_SKIP.cooldownSeconds;
+    this.walkStreak = 0;
+    this.skillRecharging = false;
+
+    const colour = this.player.role === 'seeker' ? COLORS.warm : COLORS.cold;
+    this.effects.ping(fromX, fromZ, colour);
+    this.effects.splash(this.player.position.x, this.player.position.z, colour);
+    this.audio.melt(this.player.position.x, this.player.position.z);
+    this.stage.shake(0.18);
+    this.callbacks.onAlert('You slipped straight through the wall!', 'splash');
+
+    this.online?.sendEvent({
+      e: 'skip',
+      x: this.player.position.x,
+      z: this.player.position.z,
+      fx: fromX,
+      fz: fromZ,
+    });
+    return true;
+  }
+
+  /**
+   * Looks for a wall the player can cross, preferring the direction they are
+   * steering and falling back to the way they are facing. Only ever one wall
+   * tile thick: if the far side is solid too, the skip is refused.
+   */
+  private findSkipTarget(): { cx: number; cy: number } | null {
+    for (const [dx, dy] of this.skipDirections()) {
+      const wallX = this.player.cellX + dx;
+      const wallY = this.player.cellY + dy;
+      if (!this.maze.isWall(wallX, wallY)) continue;
+
+      // Straight through first, then squeezing out beside the wall block.
+      const exits: Array<[number, number]> = [
+        [wallX + dx, wallY + dy],
+        [wallX + dx + dy, wallY + dy + dx],
+        [wallX + dx - dy, wallY + dy - dx],
+      ];
+      for (const [cx, cy] of exits) {
+        // The outer shell of the maze is never passable.
+        if (cx <= 0 || cy <= 0 || cx >= this.maze.width - 1 || cy >= this.maze.height - 1) continue;
+        if (this.maze.isWall(cx, cy)) continue;
+        return { cx, cy };
+      }
+    }
+    return null;
+  }
+
+  /** Candidate grid steps, most-intended first. */
+  private skipDirections(): Array<[number, number]> {
+    const [ax, az] = screenToWorld(this.input.axis.x, this.input.axis.y);
+    let dirX = ax;
+    let dirZ = az;
+    if (Math.hypot(dirX, dirZ) < 0.15) {
+      dirX = Math.sin(this.player.facing);
+      dirZ = Math.cos(this.player.facing);
+    }
+
+    const horizontal: [number, number] = [Math.sign(dirX) || 1, 0];
+    const vertical: [number, number] = [0, Math.sign(dirZ) || 1];
+    const backHorizontal: [number, number] = [-horizontal[0], 0];
+    const backVertical: [number, number] = [0, -vertical[1]];
+    // The way they are heading first, then the sides, then back where they came from.
+    return Math.abs(dirX) >= Math.abs(dirZ)
+      ? [horizontal, vertical, backVertical, backHorizontal]
+      : [vertical, horizontal, backHorizontal, backVertical];
   }
 
   /** The other player quit: award the round to whoever is still here. */
@@ -612,6 +920,7 @@ export class Game {
       meterLabel = meter > 0.5 ? 'Frost scent — strong' : 'Frost scent';
     }
 
+    const skill = this.skillStatus;
     this.callbacks.onHud({
       role: this.player.role,
       remainingSeconds: Math.max(0, ROUND_SECONDS - this.elapsed),
@@ -619,6 +928,10 @@ export class Game {
       meterLabel,
       phase: this.phase,
       countdown: Math.max(0, Math.ceil(this.countdown)),
+      skillCharge: skill.charge,
+      skillReady: skill.ready,
+      skillSecondsLeft: skill.secondsLeft,
+      skillCharging: skill.charging,
     });
   }
 
@@ -659,6 +972,22 @@ export class Game {
     if (this.phase !== 'over') this.finish(win);
   }
 
+  /** Live snapshot for the HUD minimap. */
+  get minimapView(): MinimapView {
+    return {
+      maze: this.maze,
+      field: this.field,
+      role: this.player.role,
+      playerX: this.player.position.x,
+      playerZ: this.player.position.z,
+      playerFacing: this.player.facing,
+      rivalX: this.rival.position.x,
+      rivalZ: this.rival.position.z,
+      rivalSeen: this.lastRivalSeen,
+      memoryTint: this.memoryTint,
+    };
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -668,6 +997,8 @@ export class Game {
     }
     this.input.setEnabled(false);
     this.effects.dispose();
+    this.playerBubble.dispose();
+    this.rivalBubble.dispose();
     this.stage.scene.remove(this.player.rig.group, this.rival.rig.group);
     this.player.dispose();
     this.rival.dispose();
@@ -675,8 +1006,12 @@ export class Game {
   }
 }
 
-/** Shortest signed angular distance, so remote ghosts never spin the long way. */
-function shortestTurn(from: number, to: number): number {
+/** CSS hex string (#rrggbb) to the numeric colour three.js wants. */
+function hexOf(css: string): number {
+  return Number.parseInt(css.replace('#', ''), 16) || 0xffffff;
+}
+
+/** Shortest signed angular distance, so remote ghosts never spin the long way. */function shortestTurn(from: number, to: number): number {
   let delta = to - from;
   while (delta > Math.PI) delta -= Math.PI * 2;
   while (delta < -Math.PI) delta += Math.PI * 2;
