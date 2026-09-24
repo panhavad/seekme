@@ -8,7 +8,8 @@
 A semi-3D hide & seek game built with [three.js](https://threejs.org/). Two little sheet ghosts
 chase each other through a dark cobblestone maze: a **warm seeker** with a lantern that scorches the
 stones, and a **cold hider** whose frost creeps across them. Everything the two ghosts do leaves a
-mark, and reading those marks *is* the game.
+mark, and reading those marks *is* the game. Or pick **couple mode**, where nobody hides: the two
+ghosts are sweethearts lost in the maze, calling to each other with a love ping until they meet.
 
 **Storyline by Duk Panhavad.**
 
@@ -35,7 +36,6 @@ times as you like, nothing is ever lost or double-counted.
 | Speed | slower, quieter | faster |
 | Trail | **blue frost** that deepens the longer it stands still | **red-hot scorch** on stones *and* walls |
 | Wins by | surviving the full clock | catching the hider as fast as possible |
-
 * **Trails fade.** A scorch mark cools in ~16 s, frost in ~26 s. If you can see a mark it means
   someone was here *recently*, and its brightness tells you whether they sprinted past or loitered.
 * **Walls remember too.** The seeker's lantern heat glows in the mortar of nearby walls, so you can
@@ -63,24 +63,60 @@ times as you like, nothing is ever lost or double-counted.
 * **Win big.** Take the round and your ghost throws a little victory dance under a shower of sparks
   and confetti.
 
+### Couple mode 💗
+
+Pick **Couple** in the **Game mode** row and the maze stops being a chase. You and the other ghost
+are sweethearts who lost each other in the dark, and you have **2:30** to meet. There is no hider and
+no seeker: both of you search, both of you win, and if the clock beats you, you *both* go home alone.
+
+| | Classic chase | Couple mode |
+|---|---|---|
+| Goal | survive / catch | **meet each other** |
+| Round | 2:00 | 2:30 |
+| Start | the seeker is frozen for 3 s | neither of you moves until "go" |
+| Speed & sight | asymmetric by role | identical for both halves |
+| Skill | wall skip (22 s) | **love ping** (12 s) |
+| Ends in | one winner | two winners — or two losers |
+
+* **The love ping** replaces the wall skip on the same dial (`Space` / `F`, or tap the heart).
+  Calling out hands your sweetheart everything they need to find you: a positional sound that carries
+  right across the maze, sonar rings that punch through walls, an alert naming the **direction** and
+  whether you are close by or far off, and a heart on their minimap that fades over ~8 s. Then your
+  voice needs **12 s** to come back, so a call is a real decision, not a spam button.
+* **Playing solo**, your sweetheart is driven by the AI wearing the *searching* brain — it hunts your
+  trail, always hears your calls wherever you are, and calls back every ~15 s so the maze answers you.
+* **Hot and cold.** The bar along the bottom fills as the gap between you closes ("Cold — try calling
+  out" all the way up to "Burning hot — they are right here!"), and your heartbeat quickens with it —
+  the happy version of the chase's dread.
+* **Trails still talk.** Frost and scorch marks are now breadcrumbs *toward* each other rather than
+  evidence against you, and a splash still gives away whoever crossed the water.
+* **Softer feelings.** The emote pad swaps its angrier half for 😍 💖 😘 🥰 😉, still on keys
+  <kbd>1</kbd>–<kbd>8</kbd>.
+* **Reunions rank on their own board** — fastest time to find each other — so couple runs never
+  disturb the seeker and hider ladders.
+* Works **online** too: the host picks the mode when it creates the code, and whoever joins plays it.
+
 ### Play with a friend
 
-Open the **Online** tab, pick the side you want, and hit **Create game code**. Share the four-letter
-code; your friend types it in and you both drop into the same maze — same layout, same ponds, same
-clock. There is no account, no lobby list and no matchmaking: the code *is* the room.
+Open the **Online** tab, pick the mode and the side you want, and hit **Create game code**. Share the
+four-letter code; your friend types it in and you both drop into the same maze — same layout, same
+ponds, same clock, same mode. There is no account, no lobby list and no matchmaking: the code *is*
+the room.
 
 The wire format is deliberately tiny. Each client owns its own ghost and publishes a ~40-byte
 transform packet 15 times a second; everything else (the maze, the trails, the fog of war, the
 lighting) is derived locally from the shared seed. Only genuine one-off events — a splash, a new melt
-pond, a wall skip, a catch, the final whistle — are relayed, and each is owned by exactly one side so
-the two clients can never double-count them. If your friend disconnects, the round is awarded to you.
+pond, a wall skip, a love ping, a catch, a reunion, the final whistle — are relayed, and each is owned
+by exactly one side so the two clients can never double-count them. If your friend disconnects, the
+round is awarded to you (in couple mode it simply ends — a reunion is not something you can win
+alone).
 
 ### Controls
 
 | Action | Input |
 |---|---|
 | Move | `W` `A` `S` `D` / arrow keys, or drag anywhere on touch |
-| Wall skip | `Space` / `F`, or the charge dial in the bottom-right |
+| Wall skip / love ping | `Space` / `F`, or the charge dial in the bottom-right |
 | Emotes | `1` – `8`, or the emote pad in the top-right |
 | Pause | `Esc` or the **Menu** button |
 | Mute | `M` |
@@ -155,7 +191,8 @@ Environment variables for the server: `PORT`, `HOST`, `PUBLIC_DIR`, `DATA_DIR`.
 5. While offline the leaderboard shows the last copy this device downloaded, clearly marked as such.
 
 Leaderboards keep one personal best per device: **seekers** rank by fastest catch (wins only),
-**hiders** by longest survival.
+**hiders** by longest survival, **couples** by the fastest reunion (wins only). Couple runs never
+appear on the two chase boards, and scores stored before couple mode existed are read as classic runs.
 
 ---
 
@@ -164,7 +201,7 @@ Leaderboards keep one personal best per device: **seekers** rank by fastest catc
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/health` | liveness, stored score count, open rooms |
-| `GET` | `/api/leaderboard?role=seeker\|hider&limit=25` | ranked rows |
+| `GET` | `/api/leaderboard?board=seeker\|hider\|couple&limit=25` | ranked rows (`role=` still accepted) |
 | `POST` | `/api/scores` | `{ "scores": [ … ] }`, idempotent by `id`, max 200 per call |
 | `WS` | `/ws` | private match relay (create / join / state / event) |
 
@@ -200,8 +237,10 @@ Some implementation notes:
   is what makes them glow where the lantern passed.
 * **Visibility** uses recursive shadowcasting on the grid, so corners genuinely hide you.
 * **The rival AI plays by the same rules as you:** it only sees what it has line of sight to, follows
-  frost it can actually see, investigates splashes it is close enough to hear, and sweeps the alleys
-  it has not checked recently. Difficulty changes its senses, not its rulebook.
+  the other ghost's trail when it can actually see it, investigates splashes it is close enough to
+  hear, and sweeps the alleys it has not checked recently. Difficulty changes its senses, not its
+  rulebook. Couple mode hands that same *searching* brain to whichever ghost the AI is playing, so
+  your sweetheart looks for you exactly the way a seeker would — except it also calls back.
 * **The menu is part of the game.** Behind it a full AI-vs-AI demo match plays out in the same maze,
   and the title is a genuinely 3D object — extruded, bevelled letters lit by a flickering lantern
   with the game's own ghost model standing beside them, rendered in its own canvas and tilting with
@@ -213,8 +252,9 @@ Some implementation notes:
 
 ### Debug harness
 
-Open with `?debug=1` to expose `window.__seekme` (`start(role)`, `tick(dt, steps)`, `hold(x, y)`,
-`skip()`, `state()`), which steps the simulation deterministically — handy for automated testing.
+Open with `?debug=1` to expose `window.__seekme` (`start(role, mode)`, `tick(dt, steps)`,
+`hold(x, y)`, `skip()`, `ping()`, `state()`), which steps the simulation deterministically — handy
+for automated testing.
 
 ---
 

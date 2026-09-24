@@ -1,6 +1,6 @@
 {
   "name": "seekme",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "SeekMe - a semi-3D offline-first hide & seek ghost game built with three.js",
   "type": "module",

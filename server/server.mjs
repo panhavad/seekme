@@ -24,7 +24,9 @@ const SCORES_FILE = join(DATA_DIR, 'scores.json');
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_SCORES = 20000;
 const ROLES = new Set(['hider', 'seeker']);
+const BOARDS = new Set(['hider', 'seeker', 'couple']);
 const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
+const MODES = new Set(['classic', 'couple']);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -98,6 +100,8 @@ function validateScore(input) {
     clientId: clientId.slice(0, 64),
     name: sanitizeName(input.name),
     role,
+    // Scores predating couple mode carry no mode at all: they are classic runs.
+    mode: MODES.has(input.mode) ? input.mode : 'classic',
     difficulty,
     win,
     timeMs: Math.round(timeMs),
@@ -110,32 +114,42 @@ function validateScore(input) {
 }
 
 /**
- * Seekers rank by fastest catch (wins only); hiders rank by longest survival.
- * Only a player's personal best is listed, so nobody can flood the board.
+ * Seekers rank by fastest catch (wins only); hiders rank by longest survival;
+ * couples rank by the fastest reunion (wins only). Only a player's personal
+ * best is listed, so nobody can flood the board.
  */
-function buildBoard(role, limit) {
+function buildBoard(board, limit) {
+  const couple = board === 'couple';
+  const fastest = couple || board === 'seeker';
   const best = new Map();
+
   for (const score of store.scores) {
-    if (score.role !== role) continue;
-    if (role === 'seeker' && !score.win) continue;
+    const mode = score.mode ?? 'classic';
+    if (couple) {
+      if (mode !== 'couple' || !score.win) continue;
+    } else {
+      if (mode === 'couple' || score.role !== board) continue;
+      if (board === 'seeker' && !score.win) continue;
+    }
 
     const current = best.get(score.clientId);
     if (!current) {
       best.set(score.clientId, score);
       continue;
     }
-    const better = role === 'seeker' ? score.timeMs < current.timeMs : score.timeMs > current.timeMs;
+    const better = fastest ? score.timeMs < current.timeMs : score.timeMs > current.timeMs;
     if (better) best.set(score.clientId, score);
   }
 
   const rows = [...best.values()].sort((a, b) =>
-    role === 'seeker' ? a.timeMs - b.timeMs : b.timeMs - a.timeMs
+    fastest ? a.timeMs - b.timeMs : b.timeMs - a.timeMs
   );
 
   return rows.slice(0, limit).map((score) => ({
     id: score.id,
     name: score.name,
     role: score.role,
+    mode: score.mode ?? 'classic',
     difficulty: score.difficulty,
     timeMs: score.timeMs,
     win: score.win,
@@ -227,9 +241,11 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === '/api/leaderboard' && req.method === 'GET') {
-    const role = ROLES.has(url.searchParams.get('role')) ? url.searchParams.get('role') : 'seeker';
+    // `board` is the current name; `role` is kept for older clients.
+    const requested = url.searchParams.get('board') ?? url.searchParams.get('role');
+    const board = BOARDS.has(requested) ? requested : 'seeker';
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 25) || 25));
-    sendJson(res, 200, { ok: true, role, rows: buildBoard(role, limit) });
+    sendJson(res, 200, { ok: true, board, role: board, rows: buildBoard(board, limit) });
     return true;
   }
 

@@ -8,6 +8,8 @@
   --warm-deep: #ff5a2b;
   --cold: #6fd8ff;
   --cold-deep: #2f7dff;
+  --love: #ff6fae;
+  --love-deep: #ff2d78;
 }
 
 * {
@@ -402,6 +404,37 @@ input[type='text']:focus {
 
 .cold {
   color: var(--cold);
+}
+
+.love {
+  color: var(--love);
+}
+
+/* ------------------------------ couple mode ------------------------------ */
+/* Every mode-specific blurb lives in the markup; CSS shows the right one.
+   The selectors match the specificity of `.field > span` / `.choice small`,
+   which would otherwise force the hidden variant back on screen. */
+.field > span.note-couple,
+.choice small.note-couple {
+  display: none;
+}
+
+#menu.couple .field > span.note-couple,
+#menu.couple .choice small.note-couple {
+  display: block;
+}
+
+#menu.couple .field > span.note-classic,
+#menu.couple .choice small.note-classic {
+  display: none;
+}
+
+/* The selected couple-mode card wears the love palette. */
+[data-choice='mode'] .choice[data-value='couple'].selected {
+  border-color: rgba(255, 111, 174, 0.8);
+  background: linear-gradient(180deg, rgba(92, 24, 56, 0.88), rgba(32, 12, 24, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 200, 225, 0.25), 0 5px 0 -1px rgba(86, 12, 48, 0.95),
+    0 12px 26px rgba(255, 45, 120, 0.22);
 }
 
 .primary {
@@ -1033,6 +1066,49 @@ kbd {
   line-height: 0;
 }
 
+/* The heart glyph only appears in couple mode, and replaces the skip arrow. */
+.skill-glyph.love {
+  display: none;
+  color: var(--love);
+}
+
+#hud.couple .skill-glyph {
+  display: none;
+}
+
+#hud.couple .skill-glyph.love {
+  display: grid;
+}
+
+#hud.couple .skill-ring {
+  background: conic-gradient(
+    var(--love) calc(var(--charge, 0) * 360deg),
+    rgba(255, 255, 255, 0.08) 0
+  );
+}
+
+#hud.couple .skill-btn.ready {
+  border-color: rgba(255, 111, 174, 0.6);
+  animation: love-pulse 1.5s ease-in-out infinite;
+}
+
+#hud.couple .skill-btn.ready .skill-timer,
+#hud.couple .skill-btn.charging .skill-timer {
+  color: var(--love);
+}
+
+@keyframes love-pulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 0 22px rgba(255, 111, 174, 0.55);
+    transform: translateX(-50%) scale(1.04);
+  }
+}
+
 .skill-timer {
   position: absolute;
   bottom: 9px;
@@ -1202,6 +1278,21 @@ kbd {
 
 #hud.seeker .meter-bar i {
   background: linear-gradient(90deg, var(--warm-deep), var(--warm));
+}
+
+/* Couple mode's meter is a hot-and-cold dial, so it wears the love gradient. */
+#hud.couple .meter-bar i,
+#hud.couple.seeker .meter-bar i {
+  background: linear-gradient(90deg, var(--cold-deep), var(--love), var(--love-deep));
+}
+
+#hud.couple .meter-label {
+  color: var(--love);
+}
+
+#hud.couple .hud-chip .dot,
+#hud.couple #hud-role.seeker .dot {
+  background: var(--love);
 }
 
 .hud-alerts {

@@ -1,7 +1,15 @@
-import { EMOTES, formatClock, formatPreciseClock, type Difficulty, type EmoteKey, type Role } from '../game/config';
+import {
+  emotePad,
+  formatClock,
+  formatPreciseClock,
+  type Difficulty,
+  type EmoteKey,
+  type GameMode,
+  type Role,
+} from '../game/config';
 import { BRIGHTNESS_MAX, BRIGHTNESS_MIN, BRIGHTNESS_STEP, clampBrightness, formatBrightness } from '../game/settings';
 import { THEMES, THEME_DEFAULT, THEME_KEYS, isThemeKey, type ThemeKey } from '../render/themes';
-import type { BoardRow } from '../net/leaderboard';
+import type { BoardRow, BoardKey } from '../net/leaderboard';
 import type { HudState } from '../game/game';
 import { Minimap, type MinimapSource } from './minimap';
 
@@ -32,6 +40,10 @@ export class Ui {
   private readonly difficultyChoices = el('choice-difficulty');
   private readonly onlineRoleChoices = el('choice-online-role');
   private readonly themeChoices = el('choice-theme');
+  /** Both mode pickers (Play tab and Online tab) drive the same setting. */
+  private readonly modeChoiceGroups = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-choice="mode"]')
+  );
   private readonly codeInput = el<HTMLInputElement>('input-code');
   private readonly roomCode = el('room-code');
   private readonly codeBox = el('code-box');
@@ -64,12 +76,16 @@ export class Ui {
   );
 
   private toastTimer = 0;
-  private boardRole: Role = 'seeker';
+  private boardKey: BoardKey = 'seeker';
 
   role: Role = 'hider';
   difficulty: Difficulty = 'normal';
   onlineRole: Role = 'hider';
   theme: ThemeKey = THEME_DEFAULT;
+  /** Which rules the next round is played by, shared by both mode pickers. */
+  mode: GameMode = 'classic';
+  /** The mode the HUD is currently dressed for. */
+  private hudMode: GameMode = 'classic';
 
   onPlay: (() => void) | null = null;
   onPlayAgain: (() => void) | null = null;
@@ -78,7 +94,7 @@ export class Ui {
   onQuit: (() => void) | null = null;
   onPause: (() => void) | null = null;
   onSync: (() => void) | null = null;
-  onBoardChange: ((role: Role) => void) | null = null;
+  onBoardChange: ((board: BoardKey) => void) | null = null;
   onNameChange: ((name: string) => void) | null = null;
   onHostGame: (() => void) | null = null;
   onJoinGame: ((code: string) => void) | null = null;
@@ -88,6 +104,7 @@ export class Ui {
   onSkill: (() => void) | null = null;
   onBrightnessChange: ((value: number) => void) | null = null;
   onThemeChange: ((theme: ThemeKey) => void) | null = null;
+  onModeChange: ((mode: GameMode) => void) | null = null;
 
   constructor(version: string) {
     el('app-version').textContent = `SeekMe v${version} · plays offline · Storyline by Duk Panhavad`;
@@ -121,6 +138,9 @@ export class Ui {
     this.wireChoices(this.onlineRoleChoices, (value) => {
       this.onlineRole = value as Role;
     });
+    for (const group of this.modeChoiceGroups) {
+      this.wireChoices(group, (value) => this.setMode(value === 'couple' ? 'couple' : 'classic'));
+    }
 
     el('btn-host').addEventListener('click', () => this.onHostGame?.());
     el('btn-join').addEventListener('click', () => this.onJoinGame?.(this.codeInput.value));
@@ -141,8 +161,8 @@ export class Ui {
         for (const other of Array.from(document.querySelectorAll('.pill'))) {
           other.classList.toggle('selected', other === pill);
         }
-        this.boardRole = (pill.dataset.board as Role) ?? 'seeker';
-        this.onBoardChange?.(this.boardRole);
+        this.boardKey = (pill.dataset.board as BoardKey) ?? 'seeker';
+        this.onBoardChange?.(this.boardKey);
       });
     }
 
@@ -150,6 +170,23 @@ export class Ui {
     this.buildEmoteBar();
     this.buildThemePicker();
     this.wireBrightness();
+    this.setMode(this.mode);
+  }
+
+  /**
+   * Switches the whole menu between the chase and couple mode: both pickers
+   * stay in step and every mode-specific blurb swaps over in CSS.
+   */
+  setMode(mode: GameMode): void {
+    const changed = mode !== this.mode;
+    this.mode = mode;
+    this.menu.classList.toggle('couple', mode === 'couple');
+    for (const group of this.modeChoiceGroups) {
+      for (const button of Array.from(group.querySelectorAll<HTMLElement>('.choice'))) {
+        button.classList.toggle('selected', button.dataset.value === mode);
+      }
+    }
+    if (changed) this.onModeChange?.(mode);
   }
 
   /**
@@ -259,7 +296,7 @@ export class Ui {
     for (const panel of Array.from(document.querySelectorAll<HTMLElement>('.tab-panel'))) {
       panel.classList.toggle('active', panel.dataset.panel === name);
     }
-    if (name === 'board') this.onBoardChange?.(this.boardRole);
+    if (name === 'board') this.onBoardChange?.(this.boardKey);
   }
 
   setName(name: string): void {
@@ -274,11 +311,11 @@ export class Ui {
     this.onNameChange?.(cleaned);
   }
 
-  /** Builds the emote strip once, from the shared catalogue. */
-  private buildEmoteBar(): void {
+  /** Builds the emote strip from the catalogue for the mode being played. */
+  private buildEmoteBar(mode: GameMode = this.hudMode): void {
     const bar = el('emote-bar');
     bar.innerHTML = '';
-    EMOTES.forEach((emote, index) => {
+    emotePad(mode).forEach((emote, index) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'emote-btn';
@@ -345,8 +382,8 @@ export class Ui {
     this.codeInput.value = '';
   }
 
-  get currentBoardRole(): Role {
-    return this.boardRole;
+  get currentBoard(): BoardKey {
+    return this.boardKey;
   }
 
   show(screen: Screen): void {
@@ -372,28 +409,52 @@ export class Ui {
     this.minimap.render(dt);
   }
 
-  prepareHud(role: Role): void {
+  prepareHud(role: Role, mode: GameMode = 'classic'): void {
+    this.hudMode = mode;
+    const couple = mode === 'couple';
     this.roleChip.classList.toggle('seeker', role === 'seeker');
     this.hud.classList.toggle('seeker', role === 'seeker');
-    this.roleText.textContent = role === 'seeker' ? 'Seeker' : 'Hider';
-    this.objective.textContent =
-      role === 'seeker'
-        ? 'Follow the frost. Catch the little ghost before the clock runs out.'
-        : 'Stay unseen until the clock runs out. Watch for glowing stones.';
+    this.hud.classList.toggle('couple', couple);
+    if (couple) {
+      this.roleText.textContent = role === 'seeker' ? 'Warm half' : 'Cold half';
+      this.objective.textContent =
+        'You lost each other in the maze. Find your sweetheart before the clock runs out — call out with 💗 to say where you are.';
+    } else {
+      this.roleText.textContent = role === 'seeker' ? 'Seeker' : 'Hider';
+      this.objective.textContent =
+        role === 'seeker'
+          ? 'Follow the frost. Catch the little ghost before the clock runs out.'
+          : 'Stay unseen until the clock runs out. Watch for glowing stones.';
+    }
     this.alerts.innerHTML = '';
     this.meterFill.style.width = '0%';
+    this.meterLabel.textContent = couple ? 'Cold — try calling out' : 'Chill trail';
+    this.buildEmoteBar(mode);
     this.setSkill({ charge: 1, ready: true, secondsLeft: 0, charging: false });
   }
 
-  /** Paints the wall-skip dial: a charge sweep plus the wait still to go. */
+  /** Paints the skill dial: a charge sweep plus the wait still to go. */
   private setSkill(state: { charge: number; ready: boolean; secondsLeft: number; charging: boolean }): void {
+    const couple = this.hudMode === 'couple';
     this.skillRing.style.setProperty('--charge', state.charge.toFixed(3));
     this.skillButton.classList.toggle('ready', state.ready);
     this.skillButton.classList.toggle('charging', !state.ready && state.charging);
-    this.skillTimer.textContent = state.ready ? 'SKIP' : `${Math.ceil(state.secondsLeft)}s`;
+    this.skillTimer.textContent = state.ready
+      ? couple
+        ? 'PING'
+        : 'SKIP'
+      : `${Math.ceil(state.secondsLeft)}s`;
+    if (couple) {
+      this.skillButton.title = state.ready
+        ? 'Love ping — call out to your sweetheart (Space)'
+        : `Love ping — ${Math.ceil(state.secondsLeft)}s to catch your breath`;
+      this.skillButton.setAttribute('aria-label', 'Love ping');
+      return;
+    }
     this.skillButton.title = state.ready
       ? 'Wall skip — ready (Space)'
       : `Wall skip — ${Math.ceil(state.secondsLeft)}s (keep walking to charge)`;
+    this.skillButton.setAttribute('aria-label', 'Wall skip');
   }
 
   updateHud(state: HudState): void {
@@ -434,6 +495,7 @@ export class Ui {
   showResult(options: {
     win: boolean;
     role: Role;
+    mode?: GameMode;
     timeMs: number;
     pondsMelted: number;
     peerLeft?: boolean;
@@ -442,11 +504,18 @@ export class Ui {
     const sub = el('result-sub');
     const label = el('result-score-label');
     const value = el('result-score-value');
+    const couple = options.mode === 'couple';
 
     title.classList.toggle('win', options.win);
     title.classList.toggle('lose', !options.win);
 
-    if (options.role === 'hider') {
+    if (couple) {
+      title.textContent = options.win ? 'Reunited! 💞' : 'Still lost…';
+      sub.textContent = options.win
+        ? `You found each other after ${formatPreciseClock(options.timeMs)} of calling through the dark.`
+        : 'The clock ran out with two corridors still between you. One more try?';
+      label.textContent = options.win ? 'Time apart' : 'Time searching';
+    } else if (options.role === 'hider') {
       title.textContent = options.win ? 'You vanished!' : 'Caught!';
       sub.textContent = options.win
         ? 'The lantern burned out before it ever found you.'
@@ -462,7 +531,9 @@ export class Ui {
 
     if (options.peerLeft) {
       title.textContent = 'They vanished!';
-      sub.textContent = 'Your friend left the maze, so the round is yours.';
+      sub.textContent = couple
+        ? 'Your sweetheart left the maze before you could find each other.'
+        : 'Your friend left the maze, so the round is yours.';
     }
 
     value.textContent = formatPreciseClock(options.timeMs);
@@ -480,11 +551,11 @@ export class Ui {
     extra.classList.toggle('hidden', notes.length === 0);
 
     this.show('result');
-    if (options.win) this.runConfetti();
+    if (options.win) this.runConfetti(couple);
   }
 
   /** A short burst of paper confetti across the result screen. */
-  private runConfetti(): void {
+  private runConfetti(love = false): void {
     const canvas = this.confetti;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -498,7 +569,9 @@ export class Ui {
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const colours = ['#ffb257', '#ff5a2b', '#6fd8ff', '#fff4dd', '#7fe0a0'];
+    const colours = love
+      ? ['#ff6fae', '#ff2d78', '#ffc2dd', '#fff4dd', '#ff9ec7']
+      : ['#ffb257', '#ff5a2b', '#6fd8ff', '#fff4dd', '#7fe0a0'];
     const pieces = Array.from({ length: 150 }, () => ({
       x: width * (0.08 + Math.random() * 0.84),
       y: height * (Math.random() * 0.45) - 30,
@@ -555,7 +628,7 @@ export class Ui {
     this.syncStatus.textContent = text;
   }
 
-  renderBoard(target: 'menu' | 'result', rows: BoardRow[], role: Role, highlightIds: Set<string>): void {
+  renderBoard(target: 'menu' | 'result', rows: BoardRow[], board: BoardKey, highlightIds: Set<string>): void {
     const list = target === 'menu' ? this.boardList : this.resultBoard;
     list.innerHTML = '';
 
@@ -594,7 +667,11 @@ export class Ui {
     const caption = document.createElement('li');
     caption.className = 'board-empty';
     caption.textContent =
-      role === 'seeker' ? 'Fastest catches win.' : 'Longest survival wins.';
+      board === 'couple'
+        ? 'Fastest reunions win.'
+        : board === 'seeker'
+          ? 'Fastest catches win.'
+          : 'Longest survival wins.';
     list.append(caption);
   }
 }

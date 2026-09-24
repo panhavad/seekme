@@ -16,6 +16,8 @@ export interface MinimapView {
   rivalSeen: number;
   /** The theme's tint for remembered-but-unlit ground. */
   memoryTint: [number, number, number];
+  /** Couple mode: the last love ping heard, fading out of the dial. */
+  ping?: { x: number; z: number; strength: number } | null;
 }
 
 /** Anything that can hand the minimap a fresh view (the running Game). */
@@ -39,6 +41,7 @@ function rgb(hex: number): [number, number, number] {
 const WARM = rgb(COLORS.warm);
 const COLD = rgb(COLORS.cold);
 const POND = rgb(COLORS.coldDeep);
+const LOVE = rgb(COLORS.love);
 
 function mix(value: number, target: number, amount: number): number {
   return value + (target - value) * amount;
@@ -256,6 +259,26 @@ export class Minimap {
     const playerColour = view.role === 'seeker' ? COLORS.warm : COLORS.cold;
     const rivalColour = view.role === 'seeker' ? COLORS.cold : COLORS.warm;
 
+    // A love ping outlives the sound: it sits on the dial while it fades, and
+    // hugs the rim as an arrow when the call came from off the map.
+    if (view.ping && view.ping.strength > 0) {
+      const gx = view.ping.x / TILE + (maze.width - 1) / 2 + 0.5;
+      const gy = view.ping.z / TILE + (maze.height - 1) / 2 + 0.5;
+      const spot = this.project(gx - px, gy - py, scale, centre);
+      let sx = spot[0];
+      let sy = spot[1];
+      const dx = sx - centre;
+      const dy = sy - centre;
+      const reach = Math.hypot(dx, dy);
+      const rim = radius - 7;
+      const offMap = reach > rim;
+      if (offMap && reach > 0) {
+        sx = centre + (dx / reach) * rim;
+        sy = centre + (dy / reach) * rim;
+      }
+      this.heart(sx, sy, offMap ? 4.6 : 5.4, LOVE, view.ping.strength);
+    }
+
     if (view.rivalSeen > 0.25) {
       const rx = view.rivalX / TILE + (maze.width - 1) / 2 + 0.5;
       const ry = view.rivalZ / TILE + (maze.height - 1) / 2 + 0.5;
@@ -292,6 +315,33 @@ export class Minimap {
     const cos = Math.cos(VIEW_ROTATION);
     const sin = Math.sin(VIEW_ROTATION);
     return [centre + (dx * cos - dy * sin) * scale, centre + (dx * sin + dy * cos) * scale];
+  }
+
+  /** A small heart, used for love pings on the dial. */
+  private heart(x: number, y: number, size: number, colour: [number, number, number], alpha: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const [r, g, b] = colour;
+    // Pulses as it fades, so a fresh call is unmistakable.
+    const pulse = 1 + 0.18 * Math.sin(performance.now() / 150);
+    const s = size * pulse;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.moveTo(0, s * 0.85);
+    ctx.bezierCurveTo(-s * 1.3, -s * 0.15, -s * 0.5, -s * 1.15, 0, -s * 0.4);
+    ctx.bezierCurveTo(s * 0.5, -s * 1.15, s * 1.3, -s * 0.15, 0, s * 0.85);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
+    ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.95)`;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(10, 6, 12, ${(alpha * 0.7).toFixed(2)})`;
+    ctx.stroke();
+    ctx.restore();
   }
 
   private dot(x: number, y: number, radius: number, colour: number, alpha: number, ring = false): void {

@@ -1,4 +1,4 @@
-import type { Difficulty, Role } from '../game/config';
+import type { Difficulty, GameMode, Role } from '../game/config';
 
 /** What the other ghost is doing, as it comes off the wire. */
 export interface PeerState {
@@ -18,6 +18,10 @@ export type PeerEvent =
   | { e: 'emote'; k: string }
   /** A ghost slipped through a wall: `x`/`z` is where they came out. */
   | { e: 'skip'; x: number; z: number; fx: number; fz: number }
+  /** Couple mode: a love ping called from `x`/`z`. */
+  | { e: 'lovePing'; x: number; z: number }
+  /** Couple mode: the two sweethearts found each other. */
+  | { e: 'reunion'; t: number }
   /** Leader-authoritative pause. `t` is the leader's elapsed round time in ms. */
   | { e: 'pause'; paused: boolean; t: number }
   /** A guest asking the leader to pause. */
@@ -30,6 +34,8 @@ export interface MatchInfo {
   seed: number;
   role: Role;
   difficulty: Difficulty;
+  /** Which game mode the host opened the room with. */
+  mode: GameMode;
   peer: string;
   /** Server clock timestamp both sides start on. */
   startAt: number;
@@ -99,9 +105,9 @@ export class OnlineSession {
   }
 
   /** Opens a private room and returns once the server hands back a code. */
-  async host(name: string, role: Role, difficulty: Difficulty): Promise<void> {
+  async host(name: string, role: Role, difficulty: Difficulty, mode: GameMode): Promise<void> {
     await this.connect();
-    this.send({ t: 'create', name, role, difficulty });
+    this.send({ t: 'create', name, role, difficulty, mode });
     this.setStatus('waiting');
   }
 
@@ -163,6 +169,7 @@ export class OnlineSession {
           seed: Number(message.seed),
           role: message.role as Role,
           difficulty: message.difficulty as Difficulty,
+          mode: message.mode === 'couple' ? 'couple' : 'classic',
         };
         this.leader = true;
         this.onCode?.(String(message.code));
@@ -174,6 +181,7 @@ export class OnlineSession {
           seed: Number(message.seed),
           role: message.role as Role,
           difficulty: message.difficulty as Difficulty,
+          mode: message.mode === 'couple' ? 'couple' : 'classic',
           peer: String(message.peer ?? 'Ghost'),
         };
         this.leader = false;
@@ -192,6 +200,7 @@ export class OnlineSession {
           seed: this.info.seed ?? 1,
           role: (this.info.role ?? 'hider') as Role,
           difficulty: (this.info.difficulty ?? 'normal') as Difficulty,
+          mode: (this.info.mode ?? 'classic') as GameMode,
           peer: this.info.peer ?? 'Ghost',
           startAt,
           isLeader: this.leader,

@@ -25,6 +25,10 @@ export class GhostAi {
   private readonly rng: Rng;
   private readonly flow: FlowField;
   private readonly threatFlow: FlowField;
+  /** Which brain this ghost uses; couple mode makes both ghosts search. */
+  private readonly behaviour: Role;
+  /** The trail the searching brain sniffs for - always the other ghost's. */
+  private readonly huntKind: 'heat' | 'cold';
 
   private target: [number, number] | null = null;
   private planTimer = 0;
@@ -41,8 +45,19 @@ export class GhostAi {
   private clock = 0;
   private sniffTimer = 0;
 
-  constructor(role: Role, maze: Maze, field: TrailField, difficulty: Difficulty, rng: Rng) {
+  constructor(
+    role: Role,
+    maze: Maze,
+    field: TrailField,
+    difficulty: Difficulty,
+    rng: Rng,
+    /** Forces a brain: couple mode hands the searching brain to both ghosts. */
+    behaviour: Role = role
+  ) {
     this.role = role;
+    this.behaviour = behaviour;
+    // The opponent is always the other role, so their trail is the other kind.
+    this.huntKind = role === 'seeker' ? 'cold' : 'heat';
     this.maze = maze;
     this.field = field;
     this.tuning = AI[difficulty];
@@ -65,6 +80,16 @@ export class GhostAi {
     return true;
   }
 
+  /**
+   * A love ping is a deliberate shout, so unlike a splash it carries across the
+   * whole maze and is remembered for much longer.
+   */
+  hearPing(cellX: number, cellY: number): void {
+    this.heardCell = [cellX, cellY];
+    this.heardMemory = 14;
+    this.planTimer = 0;
+  }
+
   update(dt: number, self: Ghost, opponent: Ghost): [number, number] {
     this.clock += dt;
     this.planTimer -= dt;
@@ -81,7 +106,7 @@ export class GhostAi {
       this.chaseMemory = this.tuning.memorySeconds;
     }
 
-    if (this.role === 'seeker') this.thinkAsSeeker(self, opponent, sees);
+    if (this.behaviour === 'seeker') this.thinkAsSeeker(self, opponent, sees);
     else this.thinkAsHider(self, opponent, sees);
 
     return this.steer(dt, self);
@@ -118,10 +143,11 @@ export class GhostAi {
       return;
     }
 
-    // Sniff out frost: a glowing mark is a lead, and the brightest one is freshest.
+    // Sniff out the other ghost's trail: a glowing mark is a lead, and the
+    // brightest one is the freshest.
     if (this.sniffTimer <= 0 && (this.planTimer <= 0 || !this.target || this.debug.state === 'patrol')) {
       this.sniffTimer = 0.25;
-      const mark = this.spotFrost(self);
+      const mark = this.spotTrail(self);
       if (mark && !(mark.x === self.cellX && mark.y === self.cellY)) {
         this.debug.state = 'sniff';
         this.setTarget([mark.x, mark.y], true);
@@ -136,11 +162,11 @@ export class GhostAi {
   }
 
   /**
-   * Looks for frost the seeker could actually see: anything underfoot, the glow
-   * bleeding around nearby corners, and any mark in line of sight further out.
-   * Fresher (brighter) marks win.
+   * Looks for a trail the searcher could actually see: anything underfoot, the
+   * glow bleeding around nearby corners, and any mark in line of sight further
+   * out. Fresher (brighter) marks win.
    */
-  private spotFrost(self: Ghost): { x: number; y: number; value: number } | null {
+  private spotTrail(self: Ghost): { x: number; y: number; value: number } | null {
     const radius = Math.ceil(2 + this.tuning.visionTiles * this.tuning.trailSense);
     const minimum = 0.06 + (1 - this.tuning.trailSense) * 0.16;
     let best: { x: number; y: number; value: number } | null = null;
@@ -153,7 +179,8 @@ export class GhostAi {
         const y = self.cellY + dy;
         if (!this.maze.inBounds(x, y) || this.maze.isWall(x, y)) continue;
 
-        const value = this.field.coldAt(x, y);
+        const value =
+          this.huntKind === 'cold' ? this.field.coldAt(x, y) : this.field.heatAt(x, y);
         if (value < minimum) continue;
         if (distSq > 16 && !hasLineOfSight(this.maze, self.cellX, self.cellY, x, y)) continue;
         if (!best || value > best.value) best = { x, y, value };

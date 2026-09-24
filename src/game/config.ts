@@ -2,8 +2,14 @@
 
 export type Role = 'hider' | 'seeker';
 export type Difficulty = 'easy' | 'normal' | 'hard';
+/**
+ * `classic` is the original chase. `couple` turns the round on its head: the
+ * two ghosts are sweethearts who lost each other in the maze and have to meet
+ * before the clock runs out, calling to each other with a love ping.
+ */
+export type GameMode = 'classic' | 'couple';
 
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.1.0';
 
 export const TILE = 2.4;
 export const WALL_HEIGHT = 2.2;
@@ -41,21 +47,46 @@ export function rollMazeLayout(rng: () => number): MazeLayout {
 }
 
 export const ROUND_SECONDS = 120;
+/** Couple mode is a little longer: two searchers need room to miss each other. */
+export const COUPLE_ROUND_SECONDS = 150;
 
 /** Radius (in tiles) each ghost can see, and how far their glow reaches. */
 export const VISION = {
   seeker: 11.5,
   hider: 9,
+  /** Couple mode is symmetric, so both sweethearts see exactly as far. */
+  couple: 10.5,
 };
 
 /** Ghosts drift briskly - a slow chase is a boring chase. */
 export const SPEED = {
   seeker: 6.6,
   hider: 5.8,
+  /** Same legs for both halves of a couple: neither can out-run the other. */
+  couple: 6.2,
 };
 
 export const BODY_RADIUS = 0.42;
 export const CATCH_DISTANCE = 1.35;
+/** A hug is a little more forgiving than a catch. */
+export const REUNION_DISTANCE = 1.7;
+
+/**
+ * Couple mode's one skill: a love ping. It is a shout, not a teleport - it
+ * tells your sweetheart exactly where you are, and tells everyone else too.
+ */
+export const LOVE_PING = {
+  /** Seconds between call-outs. */
+  cooldownSeconds: 12,
+  /** Seconds a received ping stays lit on the minimap and the compass. */
+  revealSeconds: 8,
+  /** A ping closer than this reads as "close by" rather than "far away". */
+  closeTiles: 9,
+  /** Seconds between the AI sweetheart's own call-outs. */
+  aiCallSeconds: 15,
+  /** Tiles at which the two ghosts can simply hear each other breathing. */
+  whisperTiles: 4.5,
+};
 
 /**
  * "Wall skip": a ghost may slip through a single wall once its charge is full.
@@ -140,6 +171,9 @@ export const COLORS = {
   cold: 0x6fd8ff,
   coldDeep: 0x2f7dff,
   sheet: 0xf3f1ea,
+  /** Couple mode's own palette: the colour of a call across the maze. */
+  love: 0xff6fae,
+  loveDeep: 0xff2d78,
 };
 
 export type EmoteKey =
@@ -150,7 +184,11 @@ export type EmoteKey =
   | 'scream'
   | 'annoyed'
   | 'love'
-  | 'tease';
+  | 'tease'
+  | 'heart'
+  | 'kiss'
+  | 'blush'
+  | 'wink';
 
 export interface EmoteDefinition {
   key: EmoteKey;
@@ -173,7 +211,41 @@ export const EMOTES: readonly EmoteDefinition[] = [
   { key: 'annoyed', glyph: '😤', label: 'Annoyed', shout: 'is fed up!', selfShout: 'are fed up!', colour: '#ffb257' },
   { key: 'love', glyph: '😍', label: 'Love', shout: 'sends love!', selfShout: 'send love!', colour: '#ff9ec7' },
   { key: 'tease', glyph: '😝', label: 'Teasing', shout: 'is teasing you!', selfShout: 'are teasing!', colour: '#b6f28a' },
+  { key: 'heart', glyph: '💖', label: 'Heart', shout: 'sends a heart!', selfShout: 'send a heart!', colour: '#ff6fae' },
+  { key: 'kiss', glyph: '😘', label: 'Kiss', shout: 'blows a kiss!', selfShout: 'blow a kiss!', colour: '#ff87bd' },
+  { key: 'blush', glyph: '🥰', label: 'Blushing', shout: 'is blushing!', selfShout: 'are blushing!', colour: '#ffc2dd' },
+  { key: 'wink', glyph: '😉', label: 'Wink', shout: 'winks at you!', selfShout: 'wink!', colour: '#ffd98a' },
 ];
+
+/** The eight emotes on the pad in the classic chase, in hotkey order. */
+export const CLASSIC_EMOTES: readonly EmoteKey[] = [
+  'surprise',
+  'angry',
+  'sad',
+  'scared',
+  'scream',
+  'annoyed',
+  'love',
+  'tease',
+];
+
+/** Couple mode swaps the angrier half of the pad for softer feelings. */
+export const COUPLE_EMOTES: readonly EmoteKey[] = [
+  'love',
+  'heart',
+  'kiss',
+  'blush',
+  'wink',
+  'sad',
+  'scared',
+  'tease',
+];
+
+/** The emote pad for a mode, in hotkey (1-8) order. */
+export function emotePad(mode: GameMode): EmoteDefinition[] {
+  const keys = mode === 'couple' ? COUPLE_EMOTES : CLASSIC_EMOTES;
+  return keys.map((key) => EMOTES.find((emote) => emote.key === key)!).filter(Boolean);
+}
 
 export function findEmote(key: string): EmoteDefinition | null {
   return EMOTES.find((emote) => emote.key === key) ?? null;

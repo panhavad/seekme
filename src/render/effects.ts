@@ -29,6 +29,7 @@ export class Effects {
   private readonly moteVelocity: Float32Array;
   private readonly moteBounds = 26;
   private time = 0;
+  private disposed = false;
 
   constructor(scene: THREE.Scene, theme: Theme = getTheme(null)) {
     scene.add(this.group);
@@ -75,6 +76,17 @@ export class Effects {
     this.spawnRing(x, z, color, 1.4, 1.35, 6.5, false);
   }
 
+  /**
+   * A love ping: three rings chasing each other outward like sonar, so a call
+   * from across the maze reads as a direction even through solid walls.
+   */
+  lovePing(x: number, z: number, color: number): void {
+    this.spawnRing(x, z, color, 1.7, 2.6, 0.5, false);
+    window.setTimeout(() => this.spawnRing(x, z, color, 1.5, 2.4, 0.45, false), 240);
+    window.setTimeout(() => this.spawnRing(x, z, 0xffffff, 1.2, 2, 0.4, false), 480);
+    this.burst(x, z, color, 26, 1.1, 2.6);
+  }
+
   /** Victory! Rings, sparks and a shower of confetti motes. */
   fireworks(x: number, z: number, color: number): void {
     this.spawnRing(x, z, color, 1.3, 7.5, 0.6, false);
@@ -92,6 +104,7 @@ export class Effects {
 
   /** A puff of glowing sparks that arc up and fall back down. */
   private burst(x: number, z: number, color: number, count = 90, life = 2.4, lift = 1): void {
+    if (this.disposed) return;
     const positions = new Float32Array(count * 3);
     const velocities = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
@@ -135,6 +148,9 @@ export class Effects {
     startScale: number,
     depthTest: boolean
   ): void {
+    // Delayed rings (fireworks, love pings) can land after the round is torn
+    // down; the scene is gone by then, so quietly drop them.
+    if (this.disposed) return;
     const material = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
@@ -235,6 +251,7 @@ export class Effects {
   /** Removes everything this effects layer added to the scene. */
   dispose(): void {
     this.clear();
+    this.disposed = true;
     this.group.removeFromParent();
     this.motes.geometry.dispose();
     const material = this.motes.material as THREE.PointsMaterial;

@@ -16,7 +16,11 @@ import type { PeerEvent, PeerState } from '../net/online';
 import {
   CATCH_DISTANCE,
   COLORS,
+  COUPLE_ROUND_SECONDS,
+  LOVE_PING,
+  REUNION_DISTANCE,
   ROUND_SECONDS,
+  SPEED,
   TILE,
   TRAIL,
   VISION,
@@ -25,6 +29,7 @@ import {
   rollMazeLayout,
   type Difficulty,
   type EmoteKey,
+  type GameMode,
   type MazeLayout,
   type Role,
 } from './config';
@@ -34,6 +39,8 @@ import type { MinimapView } from '../ui/minimap';
 export interface RoundResult {
   role: Role;
   difficulty: Difficulty;
+  /** Which set of rules this round was played under. */
+  mode: GameMode;
   win: boolean;
   /** Time the round lasted: survival time for hiders, catch time for seekers. */
   timeMs: number;
@@ -47,16 +54,17 @@ export interface RoundResult {
 
 export interface HudState {
   role: Role;
+  mode: GameMode;
   remainingSeconds: number;
   meter: number;
   meterLabel: string;
   phase: RoundPhase;
   countdown: number;
-  /** Wall-skip charge: 0..1, plus the seconds still to wait. */
+  /** Wall-skip / love-ping charge: 0..1, plus the seconds still to wait. */
   skillCharge: number;
   skillReady: boolean;
   skillSecondsLeft: number;
-  /** True while walking is speeding the recharge up. */
+  /** True while walking is speeding the recharge up (classic only). */
   skillCharging: boolean;
 }
 
@@ -77,6 +85,8 @@ export interface GameOptions {
   role: Role;
   difficulty: Difficulty;
   seed: number;
+  /** Which rules to play by. Defaults to the original chase. */
+  mode?: GameMode;
   /** Attract mode: both ghosts are driven by the AI and input is ignored. */
   autoPlay?: boolean;
   /** Online match: the rival is another player instead of the AI. */
@@ -117,6 +127,8 @@ const STATE_INTERVAL = 1 / 15;
 /** One round of hide & seek: simulation, presentation and rules. */
 export class Game {
   readonly options: GameOptions;
+  /** Which rulebook this round follows. */
+  readonly mode: GameMode;
 
   private readonly stage: Stage;
   private readonly audio: GameAudio;
@@ -167,6 +179,12 @@ export class Game {
   /** Seconds of unbroken walking, which speeds the recharge up. */
   private walkStreak = 0;
   private skillRecharging = false;
+  /** Couple mode: seconds left before the love ping can be called again. */
+  private pingCooldown = 0;
+  /** Couple mode: the last call we heard, fading off the compass and dial. */
+  private partnerPing: { x: number; z: number; life: number } | null = null;
+  /** Couple mode, offline: seconds until the AI sweetheart calls back. */
+  private aiPingTimer = 0;
   /** Latest rival visibility (0..1), shared with the HUD minimap. */
   private lastRivalSeen = 0;
   /** The theme's tint for remembered ground, mirrored on the minimap. */
@@ -183,6 +201,7 @@ export class Game {
     this.audio = audio;
     this.input = input;
     this.options = options;
+    this.mode = options.mode ?? 'classic';
     this.callbacks = callbacks;
 
     this.rng = makeRng(options.seed);
@@ -211,15 +230,37 @@ export class Game {
 
     this.player = options.role === 'hider' ? hider : seeker;
     this.rival = options.role === 'hider' ? seeker : hider;
-    this.ai = new GhostAi(this.rival.role, this.maze, this.field, options.difficulty, this.rng);
+    if (this.mode === 'couple') {
+      // Sweethearts are evenly matched: neither can simply out-run the other.
+      hider.speedOverride = SPEED.couple;
+      seeker.speedOverride = SPEED.couple;
+    }
+    // In couple mode the rival is searching for us too, so it wears the
+    // searching brain whichever ghost it happens to be.
+    const rivalBrain: Role = this.mode === 'couple' ? 'seeker' : this.rival.role;
+    this.ai = new GhostAi(
+      this.rival.role,
+      this.maze,
+      this.field,
+      options.difficulty,
+      this.rng,
+      rivalBrain
+    );
     this.rival.speedScale = this.ai.speedScale;
     this.demoAi = options.autoPlay
-      ? new GhostAi(this.player.role, this.maze, this.field, options.difficulty, this.rng)
+      ? new GhostAi(
+          this.player.role,
+          this.maze,
+          this.field,
+          options.difficulty,
+          this.rng,
+          this.mode === 'couple' ? 'seeker' : this.player.role
+        )
       : null;
 
     this.online = options.online ?? null;
     this.isLeader = options.isLeader ?? true;
-    this.peerName = options.peerName ?? 'Your rival';
+    this.peerName = options.peerName ?? (this.mode === 'couple' ? 'Your sweetheart' : 'Your rival');
     this.playerBubble = new EmoteBubble(stage.scene);
     this.rivalBubble = new EmoteBubble(stage.scene);
     if (this.online) {
@@ -232,8 +273,15 @@ export class Game {
     this.spawnGhosts(hider, seeker);
     this.scatterPonds(hider, seeker);
 
-    // The seeker counts to three before the hunt begins.
-    seeker.frozen = true;
+    if (this.mode === 'couple') {
+      // Nobody hunts anybody: both halves wait out the countdown together.
+      hider.frozen = true;
+      seeker.frozen = true;
+      this.aiPingTimer = LOVE_PING.aiCallSeconds * 0.5;
+    } else {
+      // The seeker counts to three before the hunt begins.
+      seeker.frozen = true;
+    }
 
     this.focus.copy(this.player.position);
     this.rival.rig.setOpacity(0);
@@ -316,14 +364,20 @@ export class Game {
     return this.phase === 'over';
   }
 
+  /** How long this round lasts - couple mode gets a little longer. */
+  get roundSeconds(): number {
+    return this.mode === 'couple' ? COUPLE_ROUND_SECONDS : ROUND_SECONDS;
+  }
+
   /** Snapshot used by the `?debug=1` harness and for troubleshooting. */
   get debugInfo(): Record<string, unknown> {
     let ponds = 0;
     for (let i = 0; i < this.field.pond.length; i++) ponds += this.field.pond[i];
     return {
       phase: this.phase,
+      mode: this.mode,
       elapsed: this.elapsed,
-      remaining: Math.max(0, ROUND_SECONDS - this.elapsed),
+      remaining: Math.max(0, this.roundSeconds - this.elapsed),
       role: this.player.role,
       playerCell: [this.player.cellX, this.player.cellY],
       rivalCell: [this.rival.cellX, this.rival.cellY],
@@ -332,7 +386,7 @@ export class Game {
       coldHere: this.field.coldAt(this.player.cellX, this.player.cellY),
       ponds,
       pondsMelted: this.pondsMelted,
-      skillCooldown: this.skillCooldown,
+      skillCooldown: this.mode === 'couple' ? this.pingCooldown : this.skillCooldown,
       walkStreak: this.walkStreak,
       skipTarget: this.findSkipTarget(),
       aiState: this.ai.debug.state,
@@ -370,9 +424,15 @@ export class Game {
       this.countdown -= dt;
       if (this.countdown <= 0) {
         this.phase = 'running';
-        const seeker = this.player.role === 'seeker' ? this.player : this.rival;
-        seeker.frozen = false;
-        this.callbacks.onAlert('The hunt begins!', 'info');
+        if (this.mode === 'couple') {
+          this.player.frozen = false;
+          this.rival.frozen = false;
+          this.callbacks.onAlert('💗 Go find each other!', 'info');
+        } else {
+          const seeker = this.player.role === 'seeker' ? this.player : this.rival;
+          seeker.frozen = false;
+          this.callbacks.onAlert('The hunt begins!', 'info');
+        }
         this.audio.blip(true);
       }
     } else {
@@ -400,8 +460,9 @@ export class Game {
     this.depositTrail(this.rival, dt);
     this.field.decay(dt);
 
-    // ---- wall skip ------------------------------------------------------
-    this.rechargeSkill(dt, playerMoved);
+    // ---- skill ----------------------------------------------------------
+    if (this.mode === 'couple') this.updatePing(dt);
+    else this.rechargeSkill(dt, playerMoved);
 
     // ---- ponds ----------------------------------------------------------
     this.updatePonds(this.player, dt, playerMoved, true);
@@ -435,6 +496,23 @@ export class Game {
 
     // ---- end conditions -------------------------------------------------
     if (this.phase === 'running') {
+      if (this.mode === 'couple') {
+        // A reunion is good news for both sides, so either client may call it;
+        // whoever hears the event second is already over and ignores it.
+        if (distance <= REUNION_DISTANCE) {
+          if (this.online) this.online.sendEvent({ e: 'reunion', t: Math.round(this.elapsed * 1000) });
+          this.finish(true);
+          return;
+        }
+        if (this.elapsed >= this.roundSeconds) {
+          if (this.online) this.online.sendEvent({ e: 'timeup', t: Math.round(this.elapsed * 1000) });
+          this.finish(false);
+          return;
+        }
+        this.publishHud(dt);
+        return;
+      }
+
       // Online, only the seeker's client is allowed to call a catch.
       const canCallCatch = !this.online || this.player.role === 'seeker';
       if (distance <= CATCH_DISTANCE && canCallCatch) {
@@ -442,7 +520,7 @@ export class Game {
         this.finish(this.player.role === 'seeker');
         return;
       }
-      if (this.elapsed >= ROUND_SECONDS) {
+      if (this.elapsed >= this.roundSeconds) {
         if (this.online) this.online.sendEvent({ e: 'timeup', t: Math.round(this.elapsed * 1000) });
         this.finish(this.player.role === 'hider');
         return;
@@ -516,12 +594,19 @@ export class Game {
       case 'skip':
         this.receivePeerSkip(event.x, event.z, event.fx, event.fz);
         break;
+      case 'lovePing':
+        this.receiveLovePing(event.x, event.z);
+        break;
+      case 'reunion':
+        this.finish(true);
+        break;
       case 'caught':
         // The seeker called it: whoever is hiding has just lost.
         this.finish(this.player.role === 'seeker');
         break;
       case 'timeup':
-        this.finish(this.player.role === 'hider');
+        // Couple mode has no winner when the clock beats them.
+        this.finish(this.mode === 'couple' ? false : this.player.role === 'hider');
         break;
       default:
         break;
@@ -577,9 +662,94 @@ export class Game {
     this.online?.sendEvent({ e: 'emote', k: key });
   }
 
+  // ------------------------------------------------------------- love ping
+  /**
+   * Couple mode's one skill. Calling out tells your sweetheart exactly where
+   * you are - a ring through the walls, a sound they can place, and a mark on
+   * their dial - then leaves you hoarse for a while.
+   */
+  useLovePing(): boolean {
+    if (this.phase !== 'running' || this.paused || this.options.autoPlay) return false;
+
+    if (this.pingCooldown > 0) {
+      this.alertOnce(
+        'ping-cooling',
+        `Catch your breath — you can call again in ${Math.ceil(this.pingCooldown)}s.`,
+        'info',
+        1.5
+      );
+      this.audio.blip(false);
+      return false;
+    }
+
+    this.pingCooldown = LOVE_PING.cooldownSeconds;
+    const { x, z } = this.player.position;
+    this.effects.lovePing(x, z, COLORS.love);
+    this.audio.lovePing(x, z, true);
+    this.stage.shake(0.1);
+    this.callbacks.onAlert('💗 You call out — listen for an answer…', 'splash');
+
+    if (this.online) {
+      this.online.sendEvent({ e: 'lovePing', x, z });
+    } else {
+      // A deliberate shout carries: the AI sweetheart always hears it.
+      this.ai.hearPing(this.player.cellX, this.player.cellY);
+    }
+    return true;
+  }
+
+  /** A call from the other half of the couple: place it and remember it. */
+  private receiveLovePing(x: number, z: number): void {
+    this.partnerPing = { x, z, life: LOVE_PING.revealSeconds };
+    this.effects.lovePing(x, z, COLORS.loveDeep);
+    this.audio.lovePing(x, z, false);
+
+    const dx = x - this.player.position.x;
+    const dz = z - this.player.position.z;
+    const tiles = Math.hypot(dx, dz) / TILE;
+    const how = tiles < LOVE_PING.closeTiles ? 'close by' : 'far off';
+    this.callbacks.onAlert(
+      `💗 ${this.peerName} calls from the ${compassLabel(dx, dz)} — ${how}.`,
+      'splash'
+    );
+    this.callbacks.onEmote?.('💗', this.peerName, '#ff6fae', false);
+  }
+
+  /** Ticks the ping cooldown, the fading mark, and the AI's own call-outs. */
+  private updatePing(dt: number): void {
+    if (this.pingCooldown > 0) {
+      this.pingCooldown = Math.max(0, this.pingCooldown - dt);
+      if (this.pingCooldown === 0) {
+        this.audio.blip(true);
+        this.alertOnce('ping-ready', '💗 Your voice is back — call again.', 'info', 2);
+      }
+    }
+
+    if (this.partnerPing) {
+      this.partnerPing.life -= dt;
+      if (this.partnerPing.life <= 0) this.partnerPing = null;
+    }
+
+    // Offline, the AI sweetheart is searching too - and calls back now and then.
+    if (this.online || this.options.autoPlay || this.phase !== 'running') return;
+    this.aiPingTimer -= dt;
+    if (this.aiPingTimer > 0) return;
+    this.aiPingTimer = LOVE_PING.aiCallSeconds * (0.8 + this.rng() * 0.6);
+    this.receiveLovePing(this.rival.position.x, this.rival.position.z);
+  }
+
   // ------------------------------------------------------------- wall skip
   /** Charge (0..1), whether it is usable, and the wait still to go. */
   get skillStatus(): { charge: number; ready: boolean; secondsLeft: number; charging: boolean } {
+    if (this.mode === 'couple') {
+      const secondsLeft = this.pingCooldown;
+      return {
+        charge: 1 - Math.min(1, secondsLeft / LOVE_PING.cooldownSeconds),
+        ready: secondsLeft <= 0,
+        secondsLeft,
+        charging: false,
+      };
+    }
     const secondsLeft = this.skillCooldown;
     return {
       charge: 1 - Math.min(1, secondsLeft / WALL_SKIP.cooldownSeconds),
@@ -587,6 +757,11 @@ export class Game {
       secondsLeft,
       charging: this.skillRecharging,
     };
+  }
+
+  /** The skill button: a wall skip in the classic chase, a call in couple mode. */
+  useSkill(): boolean {
+    return this.mode === 'couple' ? this.useLovePing() : this.useWallSkip();
   }
 
   /**
@@ -717,7 +892,8 @@ export class Game {
     if (this.phase === 'over' || !this.online) return;
     this.peerGone = true;
     this.callbacks.onAlert('Your friend left the maze.', 'info');
-    this.finish(true);
+    // There is no winning a reunion on your own, so couple mode just stops.
+    this.finish(this.mode !== 'couple');
   }
 
   /** Plays the rival back from the packet buffer, slightly behind live. */
@@ -833,7 +1009,12 @@ export class Game {
   }
 
   private refreshVisibility(): void {
-    const radius = this.player.role === 'seeker' ? VISION.seeker : VISION.hider;
+    const radius =
+      this.mode === 'couple'
+        ? VISION.couple
+        : this.player.role === 'seeker'
+          ? VISION.seeker
+          : VISION.hider;
     computeVisibility(this.maze, this.player.cellX, this.player.cellY, radius, this.visibility);
   }
 
@@ -844,6 +1025,15 @@ export class Game {
     const tiles = Math.hypot(this.rival.cellX - this.player.cellX, this.rival.cellY - this.player.cellY);
 
     let value = lit > 0.02 ? Math.min(1, 0.35 + lit * 1.4) : 0;
+
+    if (this.mode === 'couple') {
+      // Sweethearts spot each other from the same distance, both ways: the
+      // moment there is a clear line down the alley, you have found them.
+      if (tiles < 15 && hasLineOfSight(this.maze, this.player.cellX, this.player.cellY, this.rival.cellX, this.rival.cellY)) {
+        value = Math.max(value, 1 - tiles / 18);
+      }
+      return Math.max(0, Math.min(1, value));
+    }
 
     // A lantern is hard to miss, even down a long alley.
     if (this.rival.role === 'seeker' && tiles < 17) {
@@ -860,6 +1050,11 @@ export class Game {
   }
 
   private updateAmbientCues(dt: number, tiles: number, rivalSeen: number): void {
+    if (this.mode === 'couple') {
+      this.updateCoupleCues(dt, tiles, rivalSeen);
+      return;
+    }
+
     const heatHere = this.field.heatAt(this.player.cellX, this.player.cellY);
     const coldHere = this.field.coldAt(this.player.cellX, this.player.cellY);
 
@@ -882,6 +1077,31 @@ export class Game {
       }
       this.audio.setTension(Math.max(0, 1 - tiles / 12) * 0.7);
     }
+  }
+
+  /**
+   * Couple mode's cues are all encouragement: the other half's trail, their
+   * whisper a few tiles away, and a heartbeat that quickens as you close in.
+   */
+  private updateCoupleCues(dt: number, tiles: number, rivalSeen: number): void {
+    const trailHere =
+      this.rival.role === 'seeker'
+        ? this.field.heatAt(this.player.cellX, this.player.cellY)
+        : this.field.coldAt(this.player.cellX, this.player.cellY);
+
+    if (trailHere > 0.4) {
+      this.alertOnce('their-trail', 'Their trail is still warm here — you just missed them.', 'heat', 6);
+    }
+    if (rivalSeen > 0.3 && tiles < 9) {
+      this.alertOnce('sweetheart-seen', '💗 There they are!', 'danger', 3);
+    } else if (tiles < LOVE_PING.whisperTiles) {
+      this.alertOnce('sweetheart-near', 'You can hear them breathing — very close now.', 'splash', 4);
+    }
+
+    // A happy, rising heartbeat rather than a fearful one.
+    const closeness = Math.max(0, 1 - tiles / 12);
+    this.audio.setTension(closeness * 0.5);
+    this.audio.updateHeartbeat(dt, closeness * 0.9, this.player.position.x, this.player.position.z);
   }
 
   private alertOnce(key: string, text: string, kind: AlertKind, cooldown: number): void {
@@ -911,7 +1131,19 @@ export class Game {
 
     let meter = 0;
     let meterLabel = '';
-    if (this.player.role === 'hider') {
+    if (this.mode === 'couple') {
+      // A hot-and-cold dial: the whole bar fills as your sweetheart nears.
+      const tiles = this.player.position.distanceTo(this.rival.position) / TILE;
+      meter = Math.max(0, Math.min(1, 1 - tiles / 18));
+      meterLabel =
+        meter > 0.82
+          ? 'Burning hot — they are right here!'
+          : meter > 0.6
+            ? 'Getting warm…'
+            : meter > 0.35
+              ? 'Lukewarm'
+              : 'Cold — try calling out';
+    } else if (this.player.role === 'hider') {
       meter = this.field.dwellRatio(this.player.cellX, this.player.cellY);
       meterLabel = meter > 0.6 ? 'Melting a pond!' : 'Chill building';
     } else {
@@ -923,7 +1155,8 @@ export class Game {
     const skill = this.skillStatus;
     this.callbacks.onHud({
       role: this.player.role,
-      remainingSeconds: Math.max(0, ROUND_SECONDS - this.elapsed),
+      mode: this.mode,
+      remainingSeconds: Math.max(0, this.roundSeconds - this.elapsed),
       meter,
       meterLabel,
       phase: this.phase,
@@ -945,7 +1178,17 @@ export class Game {
     this.stage.shake(win ? 0.25 : 0.6);
     this.rival.rig.setOpacity(1);
 
-    if (win) {
+    if (win && this.mode === 'couple') {
+      // Both halves celebrate, and the party happens between them.
+      this.player.rig.setCelebrating(true);
+      this.rival.rig.setCelebrating(true);
+      const midX = (this.player.position.x + this.rival.position.x) / 2;
+      const midZ = (this.player.position.z + this.rival.position.z) / 2;
+      this.effects.fireworks(midX, midZ, COLORS.love);
+      this.effects.emoteBurst(midX, midZ, COLORS.loveDeep);
+      this.stage.setFocus(midX, midZ);
+      this.showEmote('heart', true);
+    } else if (win) {
       // Confetti in the alley plus a little victory dance.
       const colour = this.player.role === 'seeker' ? COLORS.warm : COLORS.cold;
       this.player.rig.setCelebrating(true);
@@ -958,6 +1201,7 @@ export class Game {
     this.callbacks.onEnd({
       role: this.player.role,
       difficulty: this.options.difficulty,
+      mode: this.mode,
       win,
       timeMs: Math.round(this.elapsed * 1000),
       seed: this.options.seed,
@@ -985,6 +1229,13 @@ export class Game {
       rivalZ: this.rival.position.z,
       rivalSeen: this.lastRivalSeen,
       memoryTint: this.memoryTint,
+      ping: this.partnerPing
+        ? {
+            x: this.partnerPing.x,
+            z: this.partnerPing.z,
+            strength: Math.max(0, Math.min(1, this.partnerPing.life / LOVE_PING.revealSeconds)),
+          }
+        : null,
     };
   }
 

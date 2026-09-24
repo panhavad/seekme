@@ -15,6 +15,8 @@ export class Ghost {
 
   facing = 0;
   speedScale = 1;
+  /** Couple mode gives both ghosts the same legs; null keeps the role's speed. */
+  speedOverride: number | null = null;
   frozen = false;
   /** Set while the ghost is actually travelling (used for trails and ponds). */
   moving = false;
@@ -31,6 +33,7 @@ export class Ghost {
   }
 
   get baseSpeed(): number {
+    if (this.speedOverride !== null) return this.speedOverride;
     return this.role === 'seeker' ? SPEED.seeker : SPEED.hider;
   }
 

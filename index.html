@@ -46,6 +46,17 @@
               <path d="M8 12h8m0 0-3.2-3.2M16 12l-3.2 3.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             </svg>
           </span>
+          <!-- Couple mode wears a heart calling out through sonar rings. -->
+          <span class="skill-glyph love" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path
+                d="M12 20s-6.5-4.2-6.5-8.6A3.6 3.6 0 0 1 12 8.6a3.6 3.6 0 0 1 6.5 2.8C18.5 15.8 12 20 12 20Z"
+                fill="currentColor"
+              />
+              <path d="M4.2 6.6A9 9 0 0 1 7 4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none" opacity="0.7" />
+              <path d="M19.8 6.6A9 9 0 0 0 17 4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none" opacity="0.7" />
+            </svg>
+          </span>
           <span class="skill-timer" id="skill-timer">22s</span>
         </button>
         <div class="emote-bar" id="emote-bar"></div>
@@ -76,15 +87,32 @@
             </label>
 
             <div class="field">
-              <span>Pick your side</span>
+              <span>Game mode</span>
+              <div class="choices" data-choice="mode" id="choice-mode">
+                <button class="choice selected" data-value="classic" type="button">
+                  <strong>Classic chase</strong>
+                  <small>One hides, one seeks. Survive the clock or make the catch.</small>
+                </button>
+                <button class="choice" data-value="couple" type="button">
+                  <strong class="love">Couple 💗</strong>
+                  <small>Lost sweethearts. Find each other before the clock runs out.</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="note-classic">Pick your side</span>
+              <span class="note-couple">Pick your half</span>
               <div class="choices" id="choice-role">
                 <button class="choice selected" data-value="hider" type="button">
                   <strong class="cold">Hider</strong>
-                  <small>Cold ghost. Slow, quiet, leaves frost. Survive the clock.</small>
+                  <small class="note-classic">Cold ghost. Slow, quiet, leaves frost. Survive the clock.</small>
+                  <small class="note-couple">Cold ghost with a little blue wisp. Leaves frost for your love to follow.</small>
                 </button>
                 <button class="choice" data-value="seeker" type="button">
                   <strong class="warm">Seeker</strong>
-                  <small>Lantern ghost. Scorches the stones. Catch them fast.</small>
+                  <small class="note-classic">Lantern ghost. Scorches the stones. Catch them fast.</small>
+                  <small class="note-couple">Lantern ghost. Your warm scorch marks say where you have been.</small>
                 </button>
               </div>
             </div>
@@ -117,15 +145,32 @@
             </label>
 
             <div class="field">
+              <span>Game mode</span>
+              <div class="choices" data-choice="mode" id="choice-online-mode">
+                <button class="choice selected" data-value="classic" type="button">
+                  <strong>Classic chase</strong>
+                  <small>Hide and seek, the way you know it.</small>
+                </button>
+                <button class="choice" data-value="couple" type="button">
+                  <strong class="love">Couple 💗</strong>
+                  <small>Both of you search. Ping each other and meet in the middle.</small>
+                </button>
+              </div>
+              <p class="hint">The host picks the mode; whoever joins the code plays it too.</p>
+            </div>
+
+            <div class="field">
               <span>Host a game</span>
               <div class="choices" id="choice-online-role">
                 <button class="choice selected" data-value="hider" type="button">
                   <strong class="cold">I'll hide</strong>
-                  <small>Your friend seeks with the lantern.</small>
+                  <small class="note-classic">Your friend seeks with the lantern.</small>
+                  <small class="note-couple">You take the cold wisp, your friend takes the lantern.</small>
                 </button>
                 <button class="choice" data-value="seeker" type="button">
                   <strong class="warm">I'll seek</strong>
-                  <small>Your friend hides in the dark.</small>
+                  <small class="note-classic">Your friend hides in the dark.</small>
+                  <small class="note-couple">You take the lantern, your friend takes the cold wisp.</small>
                 </button>
               </div>
               <button class="primary online-primary" id="btn-host" type="button">Create game code</button>
@@ -154,6 +199,7 @@
           <section class="tab-panel" data-panel="board">            <div class="board-switch">
               <button class="pill selected" data-board="seeker" type="button">Fastest seekers</button>
               <button class="pill" data-board="hider" type="button">Longest hiders</button>
+              <button class="pill" data-board="couple" type="button">Fastest reunions</button>
             </div>
             <ol class="board" id="board-list">
               <li class="board-empty">Loading…</li>
@@ -172,10 +218,25 @@
               <li><b>Melt ponds:</b> stand still too long as the hider and the frost melts into a <b>permanent</b> puddle.</li>
               <li><b>Wall skip:</b> tap <kbd>Space</kbd> (or the ⇥ button) to slip through a single wall. It is a slow charge — it winds back up faster while you keep walking, and barely at all while you loiter.</li>
               <li><b>Splash!</b> Any ghost stepping in a pond makes a sound both sides can hear and locate.</li>
-              <li><b>Emotes:</b> tap the pad in the top-right (or press <kbd>1</kbd>–<kbd>8</kbd>) to throw a feeling — 😲 😠 😢 😨 😱 😤 😍 😝 — at your friend.</li>
+              <li><b>Emotes:</b> tap the pad in the top-right (or press <kbd>1</kbd>–<kbd>8</kbd>) to throw a feeling at your friend.</li>
               <li><b>Win:</b> hiders survive the clock, seekers catch the hider as fast as possible.</li>
+              <li>
+                <b class="love">Couple mode 💗:</b> nobody hides. You are two sweethearts who lost each
+                other in the maze and have <b>2:30</b> to meet. Both of you move at the same speed and see
+                just as far, and the round is won — or lost — <b>together</b>.
+              </li>
+              <li>
+                <b class="love">Love ping:</b> in couple mode the skill button becomes a call. Tap
+                <kbd>Space</kbd> and your sweetheart hears exactly where you are: a sound they can place,
+                rings that carry through walls and a heart on their minimap that fades over ~8 s. Then your
+                voice needs <b>12 s</b> to come back, so call when it counts.
+              </li>
+              <li>
+                <b class="love">Hot and cold:</b> the meter along the bottom fills as the two of you close
+                in, and your heartbeat quickens with it. Their trail — frost or scorch — is your other clue.
+              </li>
               <li><b>Offline:</b> play with no connection; scores queue up and sync to the leaderboard when you reconnect.</li>
-              <li><b>Online:</b> open the <b>Online</b> tab, create a code and share it — your friend types it in and you play the same maze together.</li>
+              <li><b>Online:</b> open the <b>Online</b> tab, create a code and share it — your friend types it in and you play the same maze together. Couple mode works there too.</li>
               <li><b>Themes:</b> dress the maze as an old temple, a garden park or a neon city in <b>Settings</b>. Looks only — the maze and the rules never change.</li>
             </ul>
           </section>

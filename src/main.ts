@@ -3,10 +3,10 @@ import { Stage, shouldUseBloom } from './render/stage';
 import { GameAudio } from './audio/audio';
 import { InputController } from './game/input';
 import { Game, type RoundResult } from './game/game';
-import { LeaderboardClient } from './net/leaderboard';
+import { LeaderboardClient, type BoardKey } from './net/leaderboard';
 import { OnlineSession } from './net/online';
 import { Ui } from './ui/ui';
-import { APP_VERSION, EMOTES, type Difficulty, type EmoteKey, type Role } from './game/config';
+import { APP_VERSION, emotePad, type Difficulty, type EmoteKey, type GameMode, type Role } from './game/config';
 import { loadBrightness, loadTheme, saveBrightness, saveTheme } from './game/settings';
 import { randomSeed } from './core/rng';
 import { TitleLogo } from './render/logo';
@@ -29,6 +29,8 @@ let attract = true;
 let paused = false;
 let attractTimer = 0;
 let lastPlayedRole: Role = 'hider';
+/** The mode of the round being played, so "play again" repeats it. */
+let lastPlayedMode: GameMode = 'classic';
 let onlineMatch = false;
 let isLeader = true;
 let peerName = 'Your rival';
@@ -40,21 +42,22 @@ ui.onScreenChange = (screen) => {
 };
 
 // ---------------------------------------------------------------- lifecycle
-function startRound(role: Role): void {
+function startRound(role: Role, mode: GameMode = ui.mode): void {
   game?.dispose();
   attract = false;
   paused = false;
   onlineMatch = false;
   lastPlayedRole = role;
+  lastPlayedMode = mode;
 
-  ui.prepareHud(role);
+  ui.prepareHud(role, mode);
   ui.show('game');
 
   game = new Game(
     stage,
     audio,
     input,
-    { role, difficulty: ui.difficulty, seed: randomSeed(), theme },
+    { role, difficulty: ui.difficulty, seed: randomSeed(), theme, mode },
     {
       onHud: (state) => ui.updateHud(state),
       onAlert: (text, kind) => ui.alert(text, kind),
@@ -70,6 +73,7 @@ function startOnlineRound(
   role: Role,
   seed: number,
   difficulty: Difficulty,
+  mode: GameMode,
   peer: string,
   leader: boolean
 ): void {
@@ -80,8 +84,9 @@ function startOnlineRound(
   isLeader = leader;
   peerName = peer;
   lastPlayedRole = role;
+  lastPlayedMode = mode;
 
-  ui.prepareHud(role);
+  ui.prepareHud(role, mode);
   ui.show('game');
 
   game = new Game(
@@ -92,6 +97,7 @@ function startOnlineRound(
       role,
       difficulty,
       seed,
+      mode,
       online,
       isLeader: leader,
       peerName: peer,
@@ -112,7 +118,10 @@ function startOnlineRound(
     }
   );
   ui.trackMinimap(game);
-  ui.alert(`Private match against ${peer}`, 'info');
+  ui.alert(
+    mode === 'couple' ? `💗 Couple mode with ${peer}` : `Private match against ${peer}`,
+    'info'
+  );
 }
 
 function startAttractScene(): void {
@@ -150,6 +159,7 @@ async function finishRound(result: RoundResult): Promise<void> {
   ui.showResult({
     win: result.win,
     role: result.role,
+    mode: result.mode,
     timeMs: result.timeMs,
     pondsMelted: result.pondsMelted,
     peerLeft: result.peerLeft,
@@ -158,6 +168,7 @@ async function finishRound(result: RoundResult): Promise<void> {
   const submission = leaderboard.queue({
     name: leaderboard.playerName || 'Anonymous ghost',
     role: result.role,
+    mode: result.mode,
     difficulty: result.difficulty,
     win: result.win,
     timeMs: result.timeMs,
@@ -166,12 +177,15 @@ async function finishRound(result: RoundResult): Promise<void> {
   });
   myScoreIds.add(submission.id);
 
+  const board: BoardKey = result.mode === 'couple' ? 'couple' : result.role;
   ui.setSubmitStatus('Score saved on this device. Syncing…');
   await syncScores('result');
-  if (result.role === 'seeker' && !result.win) {
+  if (result.mode === 'couple' && !result.win) {
+    ui.setSubmitStatus(`${ui.submitStatusText} Only reunions rank on the couple board.`, 'warn');
+  } else if (result.mode !== 'couple' && result.role === 'seeker' && !result.win) {
     ui.setSubmitStatus(`${ui.submitStatusText} Only catches rank on the seeker board.`, 'warn');
   }
-  await refreshBoard(result.role, 'result');
+  await refreshBoard(board, 'result');
 }
 
 // -------------------------------------------------------------- leaderboard
@@ -200,9 +214,9 @@ async function syncScores(target: 'menu' | 'result'): Promise<void> {
   }
 }
 
-async function refreshBoard(role: Role, target: 'menu' | 'result'): Promise<void> {
-  const { rows, stale } = await leaderboard.fetchBoard(role);
-  ui.renderBoard(target, rows, role, myScoreIds);
+async function refreshBoard(board: BoardKey, target: 'menu' | 'result'): Promise<void> {
+  const { rows, stale } = await leaderboard.fetchBoard(board);
+  ui.renderBoard(target, rows, board, myScoreIds);
   if (stale && target === 'menu') {
     const pending = leaderboard.pendingCount;
     ui.setSyncStatus(
@@ -247,10 +261,15 @@ ui.onThemeChange = (next) => {
   if (attract) startAttractScene();
 };
 
+ui.onModeChange = (mode) => {
+  audio.blip(mode === 'couple');
+  ui.toastMessage(mode === 'couple' ? '💗 Couple mode' : 'Classic chase');
+};
+
 ui.onPlay = () => {
   void audio.resume();
   audio.blip(true);
-  startRound(ui.role);
+  startRound(ui.role, ui.mode);
 };
 
 ui.onPlayAgain = () => {
@@ -259,7 +278,7 @@ ui.onPlayAgain = () => {
     online.leave();
     ui.setOnlineStatus('Not connected.', '');
   }
-  startRound(lastPlayedRole);
+  startRound(lastPlayedRole, lastPlayedMode);
 };
 
 ui.onMenu = () => {
@@ -278,14 +297,15 @@ ui.onQuit = () => {
 
 ui.onSync = () => {
   const target = ui.result.classList.contains('hidden') ? 'menu' : 'result';
+  const resultBoard: BoardKey = lastPlayedMode === 'couple' ? 'couple' : lastPlayedRole;
   void (async () => {
     await syncScores(target);
-    await refreshBoard(target === 'menu' ? ui.currentBoardRole : lastPlayedRole, target);
+    await refreshBoard(target === 'menu' ? ui.currentBoard : resultBoard, target);
   })();
 };
 
-ui.onBoardChange = (role) => {
-  void refreshBoard(role, 'menu');
+ui.onBoardChange = (board) => {
+  void refreshBoard(board, 'menu');
 };
 
 // ------------------------------------------------------------ online lobby
@@ -294,7 +314,7 @@ ui.onHostGame = () => {
   ui.showRoomCode(null);
   ui.setOnlineStatus('Opening a room…', '', true);
   online
-    .host(leaderboard.playerName || 'Ghost', ui.onlineRole, ui.difficulty)
+    .host(leaderboard.playerName || 'Ghost', ui.onlineRole, ui.difficulty, ui.mode)
     .catch((error: Error) => ui.setOnlineStatus(error.message, 'err'));
 };
 
@@ -335,7 +355,9 @@ online.onMatch = (info) => {
   ui.showRoomCode(null);
   ui.setOnlineStatus(`Playing with ${info.peer}.`, 'ok');
   ui.clearJoinCode();
-  startOnlineRound(info.role, info.seed, info.difficulty, info.peer, info.isLeader);
+  // The host's room decides the mode, so a guest follows whatever it opened.
+  ui.setMode(info.mode);
+  startOnlineRound(info.role, info.seed, info.difficulty, info.mode, info.peer, info.isLeader);
 };
 
 online.onPeerLeft = () => {
@@ -354,18 +376,19 @@ input.onAction = (action) => {
 };
 
 input.onEmoteKey = (index) => {
-  const emote = EMOTES[index];
+  // The pad changes with the mode, so the hotkeys follow the pad on screen.
+  const emote = emotePad(game?.mode ?? ui.mode)[index];
   if (emote) playEmote(emote.key);
 };
 
 ui.onEmote = (key) => playEmote(key);
 ui.onSkill = () => useSkill();
 
-/** The wall skip: one wall crossed, then a long walk to earn it back. */
+/** The skill button: a wall skip in the chase, a love ping in couple mode. */
 function useSkill(): void {
   if (!game || attract || paused || game.isOver) return;
   void audio.resume();
-  game.useWallSkip();
+  game.useSkill();
 }
 
 function playEmote(key: EmoteKey): void {
@@ -422,7 +445,7 @@ requestAnimationFrame(frame);
 if (new URLSearchParams(location.search).has('debug')) {
   Object.defineProperty(window, '__seekme', {
     value: {
-      start: (role: Role) => startRound(role),
+      start: (role: Role, mode: GameMode = 'classic') => startRound(role, mode),
       tick: (dt = 1 / 60, steps = 1) => {
         for (let i = 0; i < steps; i++) game?.update(dt);
       },
@@ -431,13 +454,15 @@ if (new URLSearchParams(location.search).has('debug')) {
         input.axis.y = y;
       },
       finish: (win: boolean) => game?.forceFinish(win),
-      skip: () => game?.useWallSkip() ?? false,
+      skip: () => game?.useSkill() ?? false,
+      ping: () => game?.useLovePing() ?? false,
       state: () => ({
         ...(game?.debugInfo ?? {}),
         attract,
         paused,
         brightness: stage.brightnessValue,
         theme,
+        mode: game?.mode ?? ui.mode,
         pendingScores: leaderboard.pendingCount,
       }),
     },
@@ -446,7 +471,7 @@ if (new URLSearchParams(location.search).has('debug')) {
 
 void (async () => {
   await syncScores('menu');
-  await refreshBoard(ui.currentBoardRole, 'menu');
+  await refreshBoard(ui.currentBoard, 'menu');
 })();
 
 // ---------------------------------------------------------- offline support

@@ -1,4 +1,7 @@
-import { APP_VERSION, randomGhostName, type Difficulty, type Role } from '../game/config';
+import { APP_VERSION, randomGhostName, type Difficulty, type GameMode, type Role } from '../game/config';
+
+/** The three ranked boards: two for the chase, one for couple mode. */
+export type BoardKey = Role | 'couple';
 
 export interface ScoreSubmission {
   /** Stable id so retrying a submission can never double-post a score. */
@@ -6,6 +9,8 @@ export interface ScoreSubmission {
   clientId: string;
   name: string;
   role: Role;
+  /** Which rules the run was played under; missing means the classic chase. */
+  mode: GameMode;
   difficulty: Difficulty;
   win: boolean;
   timeMs: number;
@@ -19,6 +24,7 @@ export interface BoardRow {
   id: string;
   name: string;
   role: Role;
+  mode?: GameMode;
   difficulty: Difficulty;
   timeMs: number;
   win: boolean;
@@ -189,19 +195,19 @@ export class LeaderboardClient {
   }
 
   /** Loads a board, falling back to the last cached copy while offline. */
-  async fetchBoard(role: Role): Promise<{ rows: BoardRow[]; stale: boolean }> {
+  async fetchBoard(board: BoardKey): Promise<{ rows: BoardRow[]; stale: boolean }> {
     try {
-      const response = await fetchWithTimeout(`/api/leaderboard?role=${role}&limit=25`);
+      const response = await fetchWithTimeout(`/api/leaderboard?board=${board}&limit=25`);
       if (!response.ok) throw new Error(`Server replied ${response.status}`);
       const payload = (await response.json()) as { ok: boolean; rows: BoardRow[] };
       if (!payload.ok) throw new Error('Bad payload');
-      this.boards[role] = payload.rows;
+      this.boards[board] = payload.rows;
       writeJson(BOARD_CACHE_KEY, this.boards);
       this.serverReachable = true;
       return { rows: payload.rows, stale: false };
     } catch {
       this.serverReachable = false;
-      return { rows: this.boards[role] ?? [], stale: true };
+      return { rows: this.boards[board] ?? [], stale: true };
     }
   }
 

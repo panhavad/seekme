@@ -246,6 +246,60 @@ export class GameAudio {
     cleanup(panner, now + 0.4, ctx);
   }
 
+  /**
+   * The love ping: a warm two-note call that carries much further than a
+   * splash, so a sweetheart across the maze still hears it - just faintly.
+   */
+  lovePing(x: number, z: number, mine: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || this.muted) return;
+    const now = ctx.currentTime;
+    // Your own call sits right on top of you; theirs falls away with distance.
+    const panner = this.panner(x, z, mine ? 2 : 7, mine ? 18 : 110);
+    if (!panner) return;
+    panner.connect(this.master);
+
+    // A rising "coo-ee" with a gentle vibrato, then a soft heart thump.
+    const notes = [587.33, 880, 1174.66];
+    notes.forEach((freq, i) => {
+      const start = now + i * 0.17;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.06, start + 0.22);
+
+      const vibrato = ctx.createOscillator();
+      vibrato.frequency.value = 5.5;
+      const vibratoGain = ctx.createGain();
+      vibratoGain.gain.value = freq * 0.012;
+      vibrato.connect(vibratoGain).connect(osc.frequency);
+      vibrato.start(start);
+      vibrato.stop(start + 0.5);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(mine ? 0.16 : 0.2, start + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.46);
+      osc.connect(gain).connect(panner);
+      osc.start(start);
+      osc.stop(start + 0.5);
+    });
+
+    const thump = ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(120, now);
+    thump.frequency.exponentialRampToValueAtTime(58, now + 0.26);
+    const thumpGain = ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.0001, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    thump.connect(thumpGain).connect(panner);
+    thump.start(now);
+    thump.stop(now + 0.36);
+
+    cleanup(panner, now + 1.2, ctx);
+  }
+
   /** A short chirp for an emote, positioned at whoever played it. */
   emote(kind: string, x: number, z: number): void {
     const ctx = this.ctx;
@@ -265,6 +319,10 @@ export class GameAudio {
       annoyed: { notes: [330, 294], type: 'sawtooth', step: 0.12 },
       love: { notes: [523, 659, 784], type: 'triangle', step: 0.11 },
       tease: { notes: [740, 494, 740, 494], type: 'square', step: 0.08 },
+      heart: { notes: [659, 784, 988, 1175], type: 'triangle', step: 0.1 },
+      kiss: { notes: [988, 1319], type: 'sine', step: 0.12 },
+      blush: { notes: [440, 554, 659, 554], type: 'sine', step: 0.13 },
+      wink: { notes: [880, 1175], type: 'triangle', step: 0.07 },
     };
     const motif = motifs[kind] ?? motifs.surprise;
 

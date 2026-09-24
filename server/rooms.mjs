@@ -78,6 +78,7 @@ export class RoomHub {
       seed: (Math.random() * 0xffffffff) >>> 0,
       hostRole,
       difficulty: normaliseDifficulty(message.difficulty),
+      mode: normaliseMode(message.mode),
       clients: [client, null],
       createdAt: Date.now(),
       touchedAt: Date.now(),
@@ -95,6 +96,7 @@ export class RoomHub {
       seed: room.seed,
       role: hostRole,
       difficulty: room.difficulty,
+      mode: room.mode,
       you: client.name,
     });
   }
@@ -129,6 +131,7 @@ export class RoomHub {
       seed: room.seed,
       role: guestRole,
       difficulty: room.difficulty,
+      mode: room.mode,
       you: client.name,
       peer: host?.name ?? 'Ghost',
     });
@@ -202,4 +205,8 @@ function cleanName(value) {
 
 function normaliseDifficulty(value) {
   return value === 'easy' || value === 'hard' ? value : 'normal';
+}
+
+function normaliseMode(value) {
+  return value === 'couple' ? 'couple' : 'classic';
 }
